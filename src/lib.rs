@@ -6,8 +6,9 @@ pub mod token;
 
 pub use filter::should_include_file;
 pub use git::{get_git_diff, get_git_diff_between_branches, get_git_log};
-pub use path::{label, traverse_directory};
+pub use path::{label, traverse_directory, wrap_code_block};
 pub use template::{
-    copy_to_clipboard, handle_undefined_variables, handlebars_setup, render_template, write_to_file,
+    copy_to_clipboard, handle_undefined_variables, handlebars_setup, read_paths_from_clipboard,
+    render_template, write_to_file,
 };
 pub use token::{count_tokens, get_model_info, get_tokenizer};

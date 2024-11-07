@@ -8,6 +8,7 @@ use handlebars::{no_escape, Handlebars};
 use inquire::Text;
 use regex::Regex;
 use std::io::Write;
+use std::path::PathBuf;
 
 /// Set up the Handlebars template engine with a template string and a template name.
 ///
@@ -149,4 +150,41 @@ pub fn write_to_file(output_path: &str, rendered: &str) -> Result<()> {
         format!("Prompt written to file: {}", output_path).green()
     );
     Ok(())
+}
+
+/// Reads and parses paths from clipboard content
+///
+/// # Arguments
+///
+/// * `content` - String content from clipboard
+///
+/// # Returns
+///
+/// * `Result<Vec<PathBuf>>` - Vector of parsed paths
+pub fn parse_paths_from_clipboard(content: &str) -> Result<Vec<PathBuf>> {
+    let paths: Vec<PathBuf> = content
+        .split(|c| c == ' ' || c == '\n')
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .collect();
+
+    if paths.is_empty() {
+        return Err(anyhow::anyhow!("No valid paths found in clipboard"));
+    }
+
+    Ok(paths)
+}
+
+/// Reads paths from clipboard
+///
+/// # Returns
+/// * `Result<Vec<PathBuf>>` - Vector of paths read from clipboard
+pub fn read_paths_from_clipboard() -> Result<Vec<PathBuf>> {
+    let mut clipboard = Clipboard::new()
+        .context("Failed to initialize clipboard")?;
+    
+    let content = clipboard.get_text()
+        .context("Failed to get text from clipboard")?;
+
+    parse_paths_from_clipboard(&content)
 }

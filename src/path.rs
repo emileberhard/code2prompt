@@ -144,7 +144,7 @@ pub fn label<P: AsRef<Path>>(p: P) -> String {
 /// # Returns
 ///
 /// * `String` - The wrapped code block.
-fn wrap_code_block(code: &str, extension: &str, line_numbers: bool, no_codeblock: bool) -> String {
+pub fn wrap_code_block(code: &str, extension: &str, line_numbers: bool, no_codeblock: bool) -> String {
     let delimiter = "`".repeat(3);
     let mut code_with_line_numbers = String::new();
 

@@ -7,14 +7,15 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use code2prompt::{
     copy_to_clipboard, get_git_diff, get_git_diff_between_branches, get_git_log, get_model_info,
-    get_tokenizer, handle_undefined_variables, handlebars_setup, label, render_template,
-    traverse_directory, write_to_file,
+    get_tokenizer, handle_undefined_variables, handlebars_setup, label, read_paths_from_clipboard,
+    render_template, traverse_directory, wrap_code_block, write_to_file,
 };
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error};
 use serde_json::json;
 use std::path::PathBuf;
+use std::fs;
 
 // Constants
 const DEFAULT_TEMPLATE_NAME: &str = "default";
@@ -26,8 +27,8 @@ const CUSTOM_TEMPLATE_NAME: &str = "custom";
 #[command(arg_required_else_help = true)]
 struct Cli {
     /// Path to the codebase directory
-    #[arg()]
-    path: PathBuf,
+    #[arg(required_unless_present = "read")]
+    path: Option<PathBuf>,
 
     /// Patterns to include
     #[clap(long)]
@@ -94,11 +95,91 @@ struct Cli {
     /// Print output as JSON
     #[clap(long)]
     json: bool,
+
+    /// Read paths from clipboard
+    #[clap(long)]
+    read: bool,
 }
 
 fn main() -> Result<()> {
     env_logger::init();
     let args = Cli::parse();
+
+    // Handle reading from clipboard if --read flag is present
+    if args.read {
+        let spinner = setup_spinner("Reading paths from clipboard...");
+        
+        let paths = match read_paths_from_clipboard() {
+            Ok(paths) => paths,
+            Err(e) => {
+                spinner.finish_with_message("Failed!".red().to_string());
+                eprintln!(
+                    "{}{}{} {}",
+                    "[".bold().white(),
+                    "!".bold().red(),
+                    "]".bold().white(),
+                    format!("Failed to read paths from clipboard: {}", e).red()
+                );
+                std::process::exit(1);
+            }
+        };
+
+        spinner.set_message("Processing files...");
+
+        let mut files = Vec::new();
+        for path in paths {
+            if let Ok(code_bytes) = fs::read(&path) {
+                let code = String::from_utf8_lossy(&code_bytes);
+                if !code.trim().is_empty() && !code.contains(char::REPLACEMENT_CHARACTER) {
+                    files.push(json!({
+                        "path": path.display().to_string(),
+                        "extension": path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
+                        "code": wrap_code_block(&code, path.extension().and_then(|ext| ext.to_str()).unwrap_or(""), args.line_number, args.no_codeblock),
+                    }));
+                }
+            }
+        }
+
+        // Prepare data for template
+        let data = json!({
+            "files": files
+        });
+
+        // Render template and handle output
+        let (template_content, template_name) = get_template(&args)?;
+        let handlebars = handlebars_setup(&template_content, template_name)?;
+        let rendered = render_template(&handlebars, template_name, &data)?;
+
+        spinner.finish_with_message("Done!".green().to_string());
+
+        // Handle output options
+        if !args.no_clipboard {
+            if let Err(e) = copy_to_clipboard(&rendered) {
+                eprintln!(
+                    "{}{}{} {}",
+                    "[".bold().white(),
+                    "!".bold().red(),
+                    "]".bold().white(),
+                    format!("Failed to copy to clipboard: {}", e).red()
+                );
+                println!("{}", &rendered);
+            } else {
+                println!(
+                    "{}{}{} {}",
+                    "[".bold().white(),
+                    "✓".bold().green(),
+                    "]".bold().white(),
+                    "Copied to clipboard successfully.".green()
+                );
+            }
+        }
+
+        if let Some(output_path) = &args.output {
+            write_to_file(output_path, &rendered)?;
+        }
+
+        return Ok(());
+    }
 
     // Handlebars Template Setup
     let (template_content, template_name) = get_template(&args)?;
@@ -112,8 +193,9 @@ fn main() -> Result<()> {
     let exclude_patterns = parse_patterns(&args.exclude);
 
     // Traverse the directory
+    let path = args.path.as_ref().expect("Path is required when not using --read");
     let create_tree = traverse_directory(
-        &args.path,
+        path,
         &include_patterns,
         &exclude_patterns,
         args.include_priority,
@@ -141,7 +223,7 @@ fn main() -> Result<()> {
     // Git Diff
     let git_diff = if args.diff {
         spinner.set_message("Generating git diff...");
-        get_git_diff(&args.path).unwrap_or_default()
+        get_git_diff(path).unwrap_or_default()
     } else {
         String::new()
     };
@@ -155,7 +237,7 @@ fn main() -> Result<()> {
             error!("Please provide exactly two branches separated by a comma.");
             std::process::exit(1);
         }
-        git_diff_branch = get_git_diff_between_branches(&args.path, &branches[0], &branches[1])
+        git_diff_branch = get_git_diff_between_branches(path, &branches[0], &branches[1])
             .unwrap_or_default()
     }
 
@@ -168,14 +250,14 @@ fn main() -> Result<()> {
             error!("Please provide exactly two branches separated by a comma.");
             std::process::exit(1);
         }
-        git_log_branch = get_git_log(&args.path, &branches[0], &branches[1]).unwrap_or_default()
+        git_log_branch = get_git_log(path, &branches[0], &branches[1]).unwrap_or_default()
     }
 
     spinner.finish_with_message("Done!".green().to_string());
 
     // Prepare JSON Data
     let mut data = json!({
-        "absolute_code_path": label(&args.path),
+        "absolute_code_path": label(path),
         "source_tree": tree,
         "files": files,
         "git_diff": git_diff,
@@ -216,7 +298,7 @@ fn main() -> Result<()> {
     if args.json {
         let json_output = json!({
             "prompt": rendered,
-            "directory_name": label(&args.path),
+            "directory_name": label(path),
             "token_count": token_count,
             "model_info": model_info,
             "files": paths,
