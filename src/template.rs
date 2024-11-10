@@ -166,6 +166,7 @@ pub fn parse_paths_from_clipboard(content: &str) -> Result<Vec<PathBuf>> {
         .split(|c| c == ' ' || c == '\n')
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
+        .filter(|p| p.exists()) // Only include paths that actually exist
         .collect();
 
     if paths.is_empty() {

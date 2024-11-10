@@ -124,18 +124,53 @@ fn main() -> Result<()> {
             }
         };
 
-        spinner.set_message("Processing files...");
+        spinner.set_message("Processing paths...");
 
         let mut files = Vec::new();
         for path in paths {
-            if let Ok(code_bytes) = fs::read(&path) {
-                let code = String::from_utf8_lossy(&code_bytes);
-                if !code.trim().is_empty() && !code.contains(char::REPLACEMENT_CHARACTER) {
-                    files.push(json!({
-                        "path": path.display().to_string(),
-                        "extension": path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
-                        "code": wrap_code_block(&code, path.extension().and_then(|ext| ext.to_str()).unwrap_or(""), args.line_number, args.no_codeblock),
-                    }));
+            if path.is_file() {
+                // Process single file
+                if let Ok(code_bytes) = fs::read(&path) {
+                    let code = String::from_utf8_lossy(&code_bytes);
+                    if !code.trim().is_empty() && !code.contains(char::REPLACEMENT_CHARACTER) {
+                        files.push(json!({
+                            "path": path.display().to_string(),
+                            "extension": path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
+                            "code": wrap_code_block(&code, path.extension().and_then(|ext| ext.to_str()).unwrap_or(""), args.line_number, args.no_codeblock),
+                        }));
+                    }
+                }
+            } else if path.is_dir() {
+                // Process directory using existing traverse_directory function
+                match traverse_directory(
+                    &path,
+                    &Vec::new(), // No include patterns
+                    &Vec::new(), // No exclude patterns
+                    false,       // include_priority
+                    args.line_number,
+                    args.relative_paths,
+                    false,      // exclude_from_tree
+                    args.no_codeblock,
+                ) {
+                    Ok((tree, mut dir_files)) => {
+                        // Add directory tree as a special file
+                        files.push(json!({
+                            "path": format!("{} (Directory Structure)", path.display()),
+                            "extension": "tree",
+                            "code": wrap_code_block(&tree, "", false, args.no_codeblock),
+                        }));
+                        // Add all files from the directory
+                        files.append(&mut dir_files);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{}{}{} {}",
+                            "[".bold().white(),
+                            "!".bold().red(),
+                            "]".bold().white(),
+                            format!("Failed to process directory {}: {}", path.display(), e).red()
+                        );
+                    }
                 }
             }
         }
