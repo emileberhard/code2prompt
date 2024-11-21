@@ -30,8 +30,8 @@ struct Cli {
     #[arg(required_unless_present = "read")]
     path: Option<PathBuf>,
 
-    /// Patterns to include
-    #[clap(long)]
+    /// File extensions to include (comma-separated)
+    #[clap(short = 'i', long)]
     include: Option<String>,
 
     /// Patterns to exclude
@@ -45,10 +45,6 @@ struct Cli {
     /// Exclude files/folders from the source tree based on exclude patterns
     #[clap(long)]
     exclude_from_tree: bool,
-
-    /// Display the token count of the generated prompt
-    #[clap(long)]
-    tokens: bool,
 
     /// Optional tokenizer to use for token count
     ///
@@ -224,7 +220,20 @@ fn main() -> Result<()> {
     let spinner = setup_spinner("Traversing directory and building tree...");
 
     // Parse Patterns
-    let include_patterns = parse_patterns(&args.include);
+    let include_patterns = if let Some(ref include) = args.include {
+        if include.contains('*') {
+            // Handle as glob pattern
+            parse_patterns(&Some(include.to_string()))
+        } else {
+            // Handle as file extensions
+            include
+                .split(',')
+                .map(|ext| format!("*.{}", ext.trim()))
+                .collect()
+        }
+    } else {
+        vec![]
+    };
     let exclude_patterns = parse_patterns(&args.exclude);
 
     // Traverse the directory
@@ -312,11 +321,9 @@ fn main() -> Result<()> {
     let rendered = render_template(&handlebars, template_name, &data)?;
 
     // Display Token Count
-    let token_count = if args.tokens {
+    let token_count = {
         let bpe = get_tokenizer(&args.encoding);
         bpe.encode_with_special_tokens(&rendered).len()
-    } else {
-        0
     };
 
     let paths: Vec<String> = files
@@ -340,15 +347,15 @@ fn main() -> Result<()> {
         });
         println!("{}", serde_json::to_string_pretty(&json_output)?);
         return Ok(());
-    } else if args.tokens {
-            println!(
-                "{}{}{} Token count: {}, Model info: {}",
-                "[".bold().white(),
-                "i".bold().blue(),
-                "]".bold().white(),
-                token_count.to_string().bold().yellow(),
-                model_info
-            );
+    } else {
+        println!(
+            "{}{}{} Token count: {}, Model info: {}",
+            "[".bold().white(),
+            "i".bold().blue(),
+            "]".bold().white(),
+            token_count.to_string().bold().yellow(),
+            model_info
+        );
     }
 
     // Copy to Clipboard
