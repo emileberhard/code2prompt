@@ -107,20 +107,30 @@ pub fn handle_undefined_variables(
     Ok(())
 }
 
-/// Copies the rendered template to the clipboard.
+/// Copies or appends the rendered template to the clipboard.
 ///
 /// # Arguments
 ///
 /// * `rendered` - The rendered template string.
+/// * `append` - Whether to append to existing clipboard content.
 ///
 /// # Returns
 ///
 /// * `Result<()>` - An empty result indicating success or an error.
-pub fn copy_to_clipboard(rendered: &str) -> Result<()> {
+pub fn copy_to_clipboard(rendered: &str, append: bool) -> Result<()> {
     match Clipboard::new() {
         Ok(mut clipboard) => {
+            let content = if append {
+                match clipboard.get_text() {
+                    Ok(existing) => format!("{}\n\n----------\n\n{}", existing, rendered),
+                    Err(_) => rendered.to_string(),
+                }
+            } else {
+                rendered.to_string()
+            };
+            
             clipboard
-                .set_text(rendered.to_string())
+                .set_text(content)
                 .context("Failed to copy to clipboard")?;
             Ok(())
         }

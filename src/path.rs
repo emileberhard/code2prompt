@@ -39,6 +39,40 @@ pub fn traverse_directory(
     let canonical_root_path = root_path.canonicalize()?;
     let parent_directory = label(&canonical_root_path);
 
+    // Handle single file case
+    if canonical_root_path.is_file() {
+        if should_include_file(&canonical_root_path, include, exclude, include_priority) {
+            if let Ok(code_bytes) = fs::read(&canonical_root_path) {
+                let code = String::from_utf8_lossy(&code_bytes);
+                let code_block = wrap_code_block(
+                    &code,
+                    canonical_root_path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
+                    line_number,
+                    no_codeblock,
+                );
+
+                if !code.trim().is_empty() && !code.contains(char::REPLACEMENT_CHARACTER) {
+                    let file_path = canonical_root_path.display().to_string();
+
+                    files.push(json!({
+                        "path": file_path,
+                        "extension": canonical_root_path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
+                        "code": code_block,
+                    }));
+                    debug!(target: "included_files", "Included file: {}", file_path);
+                } else {
+                    debug!("Excluded file (empty or invalid UTF-8): {}", canonical_root_path.display());
+                }
+            } else {
+                debug!("Failed to read file: {}", canonical_root_path.display());
+            }
+        }
+
+        // For single files, just return the file name as the tree
+        let tree = format!("{}", canonical_root_path.display());
+        return Ok((tree, files));
+    }
+
     // ~~~ Build the Tree ~~~
     let tree = WalkBuilder::new(&canonical_root_path)
         .git_ignore(true)

@@ -23,7 +23,7 @@ const CUSTOM_TEMPLATE_NAME: &str = "custom";
 
 // CLI Arguments
 #[derive(Parser)]
-#[clap(name = "code2prompt", version = "2.0.0", author = "Mufeed VH")]
+#[clap(name = "code2prompt", version = "2.0.1", author = "Mufeed VH")]
 #[command(arg_required_else_help = true)]
 struct Cli {
     /// Path to the codebase directory
@@ -83,6 +83,10 @@ struct Cli {
     /// Optional Disable copying to clipboard
     #[clap(long)]
     no_clipboard: bool,
+
+    /// Append to clipboard instead of overwriting
+    #[clap(short, long)]
+    append: bool,
 
     /// Optional Path to a custom Handlebars template
     #[clap(short, long)]
@@ -185,7 +189,7 @@ fn main() -> Result<()> {
 
         // Handle output options
         if !args.no_clipboard {
-            if let Err(e) = copy_to_clipboard(&rendered) {
+            if let Err(e) = copy_to_clipboard(&rendered, args.append) {
                 eprintln!(
                     "{}{}{} {}",
                     "[".bold().white(),
@@ -200,7 +204,11 @@ fn main() -> Result<()> {
                     "[".bold().white(),
                     "✓".bold().green(),
                     "]".bold().white(),
-                    "Copied to clipboard successfully.".green()
+                    if args.append {
+                        "Appended to clipboard successfully.".green()
+                    } else {
+                        "Copied to clipboard successfully.".green()
+                    }
                 );
             }
         }
@@ -217,7 +225,7 @@ fn main() -> Result<()> {
     let handlebars = handlebars_setup(&template_content, template_name)?;
 
     // Progress Bar Setup
-    let spinner = setup_spinner("Traversing directory and building tree...");
+    let spinner = setup_spinner("Processing path...");
 
     // Parse Patterns
     let include_patterns = if let Some(ref include) = args.include {
@@ -236,9 +244,22 @@ fn main() -> Result<()> {
     };
     let exclude_patterns = parse_patterns(&args.exclude);
 
-    // Traverse the directory
+    // Get the path and check if it exists
     let path = args.path.as_ref().expect("Path is required when not using --read");
-    let create_tree = traverse_directory(
+    if !path.exists() {
+        spinner.finish_with_message("Failed!".red().to_string());
+        return Err(anyhow::anyhow!("Path does not exist: {}", path.display()));
+    }
+
+    // Update spinner message based on path type
+    if path.is_file() {
+        spinner.set_message("Processing file...");
+    } else {
+        spinner.set_message("Traversing directory and building tree...");
+    }
+
+    // Process the path
+    let (tree, files) = traverse_directory(
         path,
         &include_patterns,
         &exclude_patterns,
@@ -247,55 +268,47 @@ fn main() -> Result<()> {
         args.relative_paths,
         args.exclude_from_tree,
         args.no_codeblock,
-    );
+    )?;
 
-    let (tree, files) = match create_tree {
-        Ok(result) => result,
-        Err(e) => {
-            spinner.finish_with_message("Failed!".red().to_string());
-            eprintln!(
-                "{}{}{} {}",
-                "[".bold().white(),
-                "!".bold().red(),
-                "]".bold().white(),
-                format!("Failed to build directory tree: {}", e).red()
-            );
-            std::process::exit(1);
+    // Git operations (only for directories)
+    let (git_diff, git_diff_branch, git_log_branch) = if path.is_dir() {
+        // Git Diff
+        let git_diff = if args.diff {
+            spinner.set_message("Generating git diff...");
+            get_git_diff(path).unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        // Git diff between branches
+        let mut git_diff_branch = String::new();
+        if let Some(branches) = &args.git_diff_branch {
+            spinner.set_message("Generating git diff between two branches...");
+            let branches = parse_patterns(&Some(branches.to_string()));
+            if branches.len() != 2 {
+                error!("Please provide exactly two branches separated by a comma.");
+                std::process::exit(1);
+            }
+            git_diff_branch = get_git_diff_between_branches(path, &branches[0], &branches[1])
+                .unwrap_or_default()
         }
-    };
 
-    // Git Diff
-    let git_diff = if args.diff {
-        spinner.set_message("Generating git diff...");
-        get_git_diff(path).unwrap_or_default()
+        // Git log between branches
+        let mut git_log_branch = String::new();
+        if let Some(branches) = &args.git_log_branch {
+            spinner.set_message("Generating git log between two branches...");
+            let branches = parse_patterns(&Some(branches.to_string()));
+            if branches.len() != 2 {
+                error!("Please provide exactly two branches separated by a comma.");
+                std::process::exit(1);
+            }
+            git_log_branch = get_git_log(path, &branches[0], &branches[1]).unwrap_or_default()
+        }
+
+        (git_diff, git_diff_branch, git_log_branch)
     } else {
-        String::new()
+        (String::new(), String::new(), String::new())
     };
-
-    // git diff two get_git_diff_between_branches
-    let mut git_diff_branch: String = String::new();
-    if let Some(branches) = &args.git_diff_branch {
-        spinner.set_message("Generating git diff between two branches...");
-        let branches = parse_patterns(&Some(branches.to_string()));
-        if branches.len() != 2 {
-            error!("Please provide exactly two branches separated by a comma.");
-            std::process::exit(1);
-        }
-        git_diff_branch = get_git_diff_between_branches(path, &branches[0], &branches[1])
-            .unwrap_or_default()
-    }
-
-    // git diff two get_git_diff_between_branches
-    let mut git_log_branch: String = String::new();
-    if let Some(branches) = &args.git_log_branch {
-        spinner.set_message("Generating git log between two branches...");
-        let branches = parse_patterns(&Some(branches.to_string()));
-        if branches.len() != 2 {
-            error!("Please provide exactly two branches separated by a comma.");
-            std::process::exit(1);
-        }
-        git_log_branch = get_git_log(path, &branches[0], &branches[1]).unwrap_or_default()
-    }
 
     spinner.finish_with_message("Done!".green().to_string());
 
@@ -360,14 +373,18 @@ fn main() -> Result<()> {
 
     // Copy to Clipboard
     if !args.no_clipboard {
-        match copy_to_clipboard(&rendered) {
+        match copy_to_clipboard(&rendered, args.append) {
             Ok(_) => {
                 println!(
                     "{}{}{} {}",
                     "[".bold().white(),
                     "✓".bold().green(),
                     "]".bold().white(),
-                    "Copied to clipboard successfully.".green()
+                    if args.append {
+                        "Appended to clipboard successfully.".green()
+                    } else {
+                        "Copied to clipboard successfully.".green()
+                    }
                 );
             }
             Err(e) => {
