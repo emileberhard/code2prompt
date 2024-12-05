@@ -187,6 +187,23 @@ fn main() -> Result<()> {
 
         spinner.finish_with_message("Done!".green().to_string());
 
+        // Display Token Count
+        let token_count = {
+            let bpe = get_tokenizer(&args.encoding);
+            bpe.encode_with_special_tokens(&rendered).len()
+        };
+
+        let model_info = get_model_info(&args.encoding);
+
+        println!(
+            "{}{}{} Token count: {}, Model info: {}",
+            "[".bold().white(),
+            "i".bold().blue(),
+            "]".bold().white(),
+            token_count.to_string().bold().yellow(),
+            model_info
+        );
+
         // Handle output options
         if !args.no_clipboard {
             if let Err(e) = copy_to_clipboard(&rendered, args.append) {
