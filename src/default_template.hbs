@@ -1,11 +1,15 @@
+{{#if absolute_code_path}}
 Project Path: {{ absolute_code_path }}
 
+{{/if}}
+{{#if source_tree}}
 Source Tree:
 
 ```
 {{ source_tree }}
 ```
 
+{{/if}}
 {{#each files}}
 {{#if code}}
 `{{path}}`:

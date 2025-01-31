@@ -8,6 +8,34 @@ use serde_json::json;
 use std::fs;
 use std::path::Path;
 use termtree::Tree;
+use regex::Regex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref BASE64_REGEX: Regex = Regex::new(r#"(?P<b64>[A-Za-z0-9+/=]{80,})"#).unwrap();
+}
+
+/// Shortens base64 strings in Jupyter notebook content
+/// 
+/// # Arguments
+/// 
+/// * `code` - The content of the Jupyter notebook file
+/// 
+/// # Returns
+/// 
+/// * `String` - The content with shortened base64 strings
+fn shorten_base64_in_ipynb(code: &str) -> String {
+    BASE64_REGEX.replace_all(code, |caps: &regex::Captures| {
+        let b64 = &caps["b64"];
+        if b64.len() > 100 {
+            let start = &b64[..50];
+            let end = &b64[b64.len()-50..];
+            format!("{}...{}", start, end)
+        } else {
+            b64.to_string()
+        }
+    }).to_string()
+}
 
 /// Traverses the directory and returns the string representation of the tree and the vector of JSON file representations.
 ///
@@ -43,10 +71,17 @@ pub fn traverse_directory(
     if canonical_root_path.is_file() {
         if should_include_file(&canonical_root_path, include, exclude, include_priority) {
             if let Ok(code_bytes) = fs::read(&canonical_root_path) {
-                let code = String::from_utf8_lossy(&code_bytes);
+                let mut code = String::from_utf8_lossy(&code_bytes).to_string();
+                
+                // If it's an ipynb file, shorten base64 strings
+                let extension = canonical_root_path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+                if extension == "ipynb" {
+                    code = shorten_base64_in_ipynb(&code);
+                }
+
                 let code_block = wrap_code_block(
                     &code,
-                    canonical_root_path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
+                    extension,
                     line_number,
                     no_codeblock,
                 );
@@ -106,7 +141,13 @@ pub fn traverse_directory(
                 // ~~~ Process the file ~~~
                 if path.is_file() && should_include_file(path, include, exclude, include_priority) {
                     if let Ok(code_bytes) = fs::read(path) {
-                        let code = String::from_utf8_lossy(&code_bytes);
+                        let mut code = String::from_utf8_lossy(&code_bytes).to_string();
+                        
+                        // If it's an ipynb file, shorten base64 strings
+                        let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+                        if extension == "ipynb" {
+                            code = shorten_base64_in_ipynb(&code);
+                        }
 
                         let code_block = wrap_code_block(&code, path.extension().and_then(|ext| ext.to_str()).unwrap_or(""), line_number, no_codeblock);
 
