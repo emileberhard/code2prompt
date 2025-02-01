@@ -73,6 +73,9 @@ pub fn traverse_directory(
             if let Ok(code_bytes) = fs::read(&canonical_root_path) {
                 let mut code = String::from_utf8_lossy(&code_bytes).to_string();
                 
+                // Sanitize any invalid UTF-8 characters
+                code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
+                
                 // If it's an ipynb file, shorten base64 strings
                 let extension = canonical_root_path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
                 if extension == "ipynb" {
@@ -86,7 +89,7 @@ pub fn traverse_directory(
                     no_codeblock,
                 );
 
-                if !code.trim().is_empty() && !code.contains(char::REPLACEMENT_CHARACTER) {
+                if !code.trim().is_empty() {
                     let file_path = canonical_root_path.display().to_string();
 
                     files.push(json!({
@@ -96,7 +99,7 @@ pub fn traverse_directory(
                     }));
                     debug!(target: "included_files", "Included file: {}", file_path);
                 } else {
-                    debug!("Excluded file (empty or invalid UTF-8): {}", canonical_root_path.display());
+                    debug!("Excluded empty file: {}", canonical_root_path.display());
                 }
             } else {
                 debug!("Failed to read file: {}", canonical_root_path.display());
@@ -143,6 +146,9 @@ pub fn traverse_directory(
                     if let Ok(code_bytes) = fs::read(path) {
                         let mut code = String::from_utf8_lossy(&code_bytes).to_string();
                         
+                        // Sanitize any invalid UTF-8 characters
+                        code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
+                        
                         // If it's an ipynb file, shorten base64 strings
                         let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
                         if extension == "ipynb" {
@@ -151,7 +157,7 @@ pub fn traverse_directory(
 
                         let code_block = wrap_code_block(&code, path.extension().and_then(|ext| ext.to_str()).unwrap_or(""), line_number, no_codeblock);
 
-                        if !code.trim().is_empty() && !code.contains(char::REPLACEMENT_CHARACTER) {
+                        if !code.trim().is_empty() {
                             let file_path = if relative_paths {
                                 format!("{}/{}", parent_directory, relative_path.display())
                             } else {
@@ -165,7 +171,7 @@ pub fn traverse_directory(
                             }));
                             debug!(target: "included_files", "Included file: {}", file_path);
                         } else {
-                            debug!("Excluded file (empty or invalid UTF-8): {}", path.display());
+                            debug!("Excluded empty file: {}", path.display());
                         }
                     } else {
                         debug!("Failed to read file: {}", path.display());
