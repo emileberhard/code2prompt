@@ -499,18 +499,40 @@ fn setup_spinner(message: &str) -> ProgressBar {
 }
 
 /// Parses comma-separated patterns into a vector of strings
+/// 
+/// Special handling:
+///   - If the user literally writes "docker", we interpret that to include
+///     "Dockerfile", "docker-compose.yml", and "docker-compose.yaml".
 ///
 /// # Arguments
 ///
 /// * `patterns` - An optional string containing comma-separated patterns
 ///
 /// # Returns
-///
 /// * `Vec<String>` - A vector of parsed patterns
 fn parse_patterns(patterns: &Option<String>) -> Vec<String> {
     match patterns {
         Some(patterns) if !patterns.is_empty() => {
-            patterns.split(',').map(|s| s.trim().to_string()).collect()
+            let mut out = Vec::new();
+            for item in patterns.split(',') {
+                let trimmed = item.trim();
+                // If the user typed `docker`, expand it to actual patterns 
+                if trimmed.eq_ignore_ascii_case("docker") {
+                    // Match Dockerfile, docker-compose.yml, docker-compose.yaml, etc.
+                    out.push("Dockerfile".to_string());
+                    out.push("docker-compose.yml".to_string());
+                    out.push("docker-compose.yaml".to_string());
+                }
+                // If the item has a wildcard already, keep it as-is
+                else if trimmed.contains('*') {
+                    out.push(trimmed.to_string());
+                }
+                // Else treat it like an extension and prefix with "*."
+                else {
+                    out.push(format!("*.{}", trimmed));
+                }
+            }
+            out
         }
         _ => vec![],
     }
