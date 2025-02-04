@@ -13,9 +13,11 @@ use code2prompt::{
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::fs;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 
 // Constants
 const DEFAULT_TEMPLATE_NAME: &str = "default";
@@ -99,6 +101,11 @@ struct Cli {
     /// Read paths from clipboard
     #[clap(long)]
     read: bool,
+
+    /// Use sampling mode: only if this flag is present, a percentage of the total files is randomly selected.
+    /// If no value is provided with -s, it defaults to 10 (i.e. 10% of files will be sampled).
+    #[clap(short = 's', long = "sample-rate", default_missing_value = "10")]
+    sample_rate: Option<u8>,
 }
 
 fn main() -> Result<()> {
@@ -276,7 +283,7 @@ fn main() -> Result<()> {
     }
 
     // Process the path
-    let (tree, files) = traverse_directory(
+    let (full_tree, all_files) = traverse_directory(
         path,
         &include_patterns,
         &exclude_patterns,
@@ -329,11 +336,55 @@ fn main() -> Result<()> {
 
     spinner.finish_with_message("Done!".green().to_string());
 
-    // Prepare JSON Data
+    // 3) Determine whether to apply sampling.
+    let (final_files, final_tree) = if let Some(rate) = args.sample_rate {
+        if rate >= 100 {
+            (all_files, full_tree)
+        } else if rate == 0 {
+            (vec![], String::new())
+        } else {
+            // Approximate sampling: measure total tokens of all files, then randomly pick files
+            // until reaching the target token count.
+            let bpe = get_tokenizer(&args.encoding);
+            let mut file_tokens = Vec::new();
+            let mut total_tokens = 0_usize;
+
+            // Pre-calculate token counts for each file.
+            for file_obj in &all_files {
+                let maybe_code = file_obj.get("code")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let tokens_count = bpe.encode_with_special_tokens(maybe_code).len();
+                total_tokens += tokens_count;
+                file_tokens.push((file_obj.clone(), tokens_count));
+            }
+
+            let target = (total_tokens as f64 * (rate as f64 / 100.0)).round() as usize;
+            let mut rng = thread_rng();
+            file_tokens.shuffle(&mut rng);
+
+            let mut chosen = Vec::new();
+            let mut accum = 0;
+            for (fobj, ftoks) in file_tokens {
+                chosen.push(fobj);
+                accum += ftoks;
+                if accum >= target {
+                    break;
+                }
+            }
+            let partial_tree = build_partial_tree(&chosen, path, args.relative_paths);
+            (chosen, partial_tree)
+        }
+    } else {
+        // If sampling flag is not provided, use all files and the full tree.
+        (all_files, full_tree)
+    };
+
+    // 5) Prepare JSON Data for template
     let mut data = json!({
         "absolute_code_path": label(path),
-        "source_tree": tree,
-        "files": files,
+        "source_tree": final_tree,
+        "files": final_files,
         "git_diff": git_diff,
         "git_diff_branch": git_diff_branch,
         "git_log_branch": git_log_branch
@@ -356,7 +407,7 @@ fn main() -> Result<()> {
         bpe.encode_with_special_tokens(&rendered).len()
     };
 
-    let paths: Vec<String> = files
+    let paths: Vec<String> = final_files
         .iter()
         .filter_map(|file| {
             file.get("path")
@@ -485,4 +536,60 @@ fn get_template(args: &Cli) -> Result<(String, &str)> {
             DEFAULT_TEMPLATE_NAME,
         ))
     }
+}
+
+/// Build a partial source tree string from only the selected files
+fn build_partial_tree(files: &Vec<Value>, root_path: &PathBuf, relative_paths: bool) -> String {
+    use termtree::Tree;
+
+    if files.is_empty() {
+        return String::new();
+    }
+
+    let parent_directory = label(root_path);
+    let mut root = Tree::new(parent_directory);
+
+    // For each file in the chosen set, add its relative path as a nested tree
+    for file in files {
+        let path_str = match file.get("path").and_then(Value::as_str) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        // Attempt to interpret path_str as a real path
+        let file_path = PathBuf::from(path_str);
+
+        // Build up a chain of leaves in the tree
+        if let Ok(rel) = if relative_paths {
+            // remove the parent's prefix from path if possible
+            file_path.strip_prefix(root_path)
+        } else {
+            // fallback: if user wants absolute or something else
+            Ok(file_path.as_path())
+        } {
+            // Convert all components to strings
+            let parts: Vec<_> = rel.components()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .collect();
+
+            let mut current_tree = &mut root;
+            for component in parts {
+                let pos = current_tree
+                    .leaves
+                    .iter()
+                    .position(|child| child.root == component);
+
+                if let Some(idx) = pos {
+                    current_tree = &mut current_tree.leaves[idx];
+                } else {
+                    let new_leaf = Tree::new(component.clone());
+                    current_tree.leaves.push(new_leaf);
+                    let last = current_tree.leaves.len() - 1;
+                    current_tree = &mut current_tree.leaves[last];
+                }
+            }
+        }
+    }
+
+    root.to_string()
 }
