@@ -252,20 +252,7 @@ fn main() -> Result<()> {
     let spinner = setup_spinner("Processing path...");
 
     // Parse Patterns
-    let include_patterns = if let Some(ref include) = args.include {
-        if include.contains('*') {
-            // Handle as glob pattern
-            parse_patterns(&Some(include.to_string()))
-        } else {
-            // Handle as file extensions
-            include
-                .split(',')
-                .map(|ext| format!("*.{}", ext.trim()))
-                .collect()
-        }
-    } else {
-        vec![]
-    };
+    let include_patterns = parse_patterns(&args.include);
     let exclude_patterns = parse_patterns(&args.exclude);
 
     // Get the path and check if it exists
