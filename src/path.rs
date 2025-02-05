@@ -1,12 +1,11 @@
 //! This module contains the functions for traversing the directory and processing the files.
 
-use crate::filter::should_include_file;
 use anyhow::Result;
 use ignore::WalkBuilder;
+use ignore::overrides::OverrideBuilder;
 use log::debug;
 use serde_json::json;
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 use termtree::Tree;
 use regex::Regex;
 use lazy_static::lazy_static;
@@ -59,145 +58,170 @@ pub fn traverse_directory(
     root_path: &Path,
     include: &[String],
     exclude: &[String],
-    include_priority: bool,
+    _include_priority: bool,
     line_number: bool,
     relative_paths: bool,
     exclude_from_tree: bool,
     no_codeblock: bool,
-    c2pignore_patterns: &[String],
+    _c2pignore_patterns: &[String],
 ) -> Result<(String, Vec<serde_json::Value>)> {
-    // ~~~ Initialization ~~~
-    let mut files = Vec::new();
     let canonical_root_path = root_path.canonicalize()?;
     let parent_directory = label(&canonical_root_path);
 
     // Handle single file case
     if canonical_root_path.is_file() {
-        if should_include_file(&canonical_root_path, include, exclude, include_priority, c2pignore_patterns) {
-            if let Ok(code_bytes) = fs::read(&canonical_root_path) {
-                let mut code = String::from_utf8_lossy(&code_bytes).to_string();
-                
-                // Sanitize any invalid UTF-8 characters
-                code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
-                
-                // If it's an ipynb file, shorten base64 strings
-                let extension = canonical_root_path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
-                if extension == "ipynb" {
-                    code = shorten_base64_in_ipynb(&code);
-                }
+        let mut files = Vec::new();
+        if let Ok(code_bytes) = fs::read(&canonical_root_path) {
+            let mut code = String::from_utf8_lossy(&code_bytes).to_string();
+            code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
 
-                let code_block = wrap_code_block(
-                    &code,
-                    extension,
-                    line_number,
-                    no_codeblock,
-                );
+            let extension = canonical_root_path.extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("");
 
-                if !code.trim().is_empty() {
-                    let file_path = canonical_root_path.display().to_string();
+            if extension == "ipynb" {
+                code = shorten_base64_in_ipynb(&code);
+            }
 
-                    files.push(json!({
-                        "path": file_path,
-                        "extension": canonical_root_path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
-                        "code": code_block,
-                    }));
-                    debug!(target: "included_files", "Included file: {}", file_path);
-                } else {
-                    debug!("Excluded empty file: {}", canonical_root_path.display());
-                }
-            } else {
-                debug!("Failed to read file: {}", canonical_root_path.display());
+            let code_block = wrap_code_block(&code, extension, line_number, no_codeblock);
+
+            if !code.trim().is_empty() {
+                files.push(json!({
+                    "path": canonical_root_path.display().to_string(),
+                    "extension": extension,
+                    "code": code_block,
+                }));
             }
         }
-
-        // For single files, just return the file name as the tree
-        let tree = format!("{}", canonical_root_path.display());
-        return Ok((tree, files));
+        return Ok((canonical_root_path.display().to_string(), files));
     }
 
-    // ~~~ Build the Tree ~~~
-    let tree = WalkBuilder::new(&canonical_root_path)
+    // Directory case: Build WalkBuilder with c2pignore support
+    let mut builder = WalkBuilder::new(&canonical_root_path);
+    builder
         .hidden(false)
         .git_ignore(false)
-        .build()
-        .filter_map(|e| e.ok())
-        .fold(Tree::new(parent_directory.to_owned()), |mut root, entry| {
-            let path = entry.path();
-            if let Ok(relative_path) = path.strip_prefix(&canonical_root_path) {
-                let mut current_tree = &mut root;
-                for component in relative_path.components() {
-                    let component_str = component.as_os_str().to_string_lossy().to_string();
+        .ignore(true)
+        .add_custom_ignore_filename("c2pignore");
 
-                    // Check if the current component should be excluded from the tree
-                    if exclude_from_tree && !should_include_file(path, include, exclude, include_priority, c2pignore_patterns) {
-                        break;
-                    }
+    // Create override builder for include/exclude patterns
+    let mut override_builder = OverrideBuilder::new(&canonical_root_path);
 
-                    current_tree = if let Some(pos) = current_tree
-                        .leaves
-                        .iter_mut()
-                        .position(|child| child.root == component_str)
-                    {
-                        &mut current_tree.leaves[pos]
-                    } else {
-                        let new_tree = Tree::new(component_str.clone());
-                        current_tree.leaves.push(new_tree);
-                        current_tree.leaves.last_mut().unwrap()
-                    };
-                }
+    // Handle includes (force include with ! prefix)
+    for inc in include {
+        if inc.contains('*') {
+            override_builder.add(&format!("!{}", inc))?;
+        } else {
+            // If no wildcard, assume it's an extension
+            override_builder.add(&format!("!**/*.{}", inc))?;
+        }
+    }
 
-                // ~~~ Process the file ~~~
-                if path.is_file() 
-                    && should_include_file(
-                        path,
-                        include,
-                        exclude,
-                        include_priority,
-                        c2pignore_patterns,
-                    )
-                {
-                    if let Ok(code_bytes) = fs::read(path) {
-                        let mut code = String::from_utf8_lossy(&code_bytes).to_string();
-                        
-                        // Sanitize any invalid UTF-8 characters
-                        code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
-                        
-                        // If it's an ipynb file, shorten base64 strings
-                        let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
-                        if extension == "ipynb" {
-                            code = shorten_base64_in_ipynb(&code);
-                        }
+    // Handle excludes (normal pattern)
+    for exc in exclude {
+        if exc.contains('*') {
+            override_builder.add(exc)?;
+        } else {
+            override_builder.add(&format!("**/*.{}", exc))?;
+        }
+    }
 
-                        let code_block = wrap_code_block(&code, path.extension().and_then(|ext| ext.to_str()).unwrap_or(""), line_number, no_codeblock);
+    let overrides = override_builder.build()?;
+    builder.overrides(overrides);
 
-                        if !code.trim().is_empty() {
-                            let file_path = if relative_paths {
-                                format!("{}/{}", parent_directory, relative_path.display())
-                            } else {
-                                path.display().to_string()
-                            };
+    let walker = builder.build();
 
-                            files.push(json!({
-                                "path": file_path,
-                                "extension": path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
-                                "code": code_block,
-                            }));
-                            debug!(target: "included_files", "Included file: {}", file_path);
-                        } else {
-                            debug!("Excluded empty file: {}", path.display());
-                        }
-                    } else {
-                        debug!("Failed to read file: {}", path.display());
-                    }
-                } else {
-                    debug!("Excluded file: {:?}", path.display());
-                }
+    // Track tree and files
+    let mut root = Tree::new(parent_directory.clone());
+    let mut files = Vec::new();
+
+    // Traverse
+    for result in walker {
+        let entry = match result {
+            Ok(e) => e,
+            Err(err) => {
+                debug!("Skipping entry due to error: {:?}", err);
+                continue;
+            }
+        };
+
+        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+            continue;
+        }
+
+        let path = entry.path();
+        let relative = match path.strip_prefix(&canonical_root_path) {
+            Ok(r) => r,
+            Err(_) => path,
+        };
+
+        // Build tree representation
+        if !exclude_from_tree {
+            add_path_to_tree(&mut root, relative);
+        }
+
+        // Process file content
+        if let Ok(code_bytes) = fs::read(path) {
+            let mut code = String::from_utf8_lossy(&code_bytes).to_string();
+            code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
+
+            let extension = path.extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("");
+
+            if extension == "ipynb" {
+                code = shorten_base64_in_ipynb(&code);
             }
 
-            root
-        });
+            let code_block = wrap_code_block(
+                &code,
+                extension,
+                line_number,
+                no_codeblock,
+            );
 
-    Ok((tree.to_string(), files))
+            if !code.trim().is_empty() {
+                let file_path = if relative_paths {
+                    format!("{}/{}", parent_directory, relative.display())
+                } else {
+                    path.display().to_string()
+                };
+
+                files.push(json!({
+                    "path": file_path,
+                    "extension": extension,
+                    "code": code_block,
+                }));
+            }
+        }
+    }
+
+    let tree_str = if exclude_from_tree {
+        String::new()
+    } else {
+        root.to_string()
+    };
+
+    Ok((tree_str, files))
+}
+
+/// Helper to nest a relative path in the tree structure
+fn add_path_to_tree(root: &mut Tree<String>, rel_path: &Path) {
+    use std::path::Component;
+    let mut current = root;
+    for c in rel_path.components() {
+        if let Component::Normal(os) = c {
+            let name = os.to_string_lossy().to_string();
+            if let Some(pos) = current.leaves.iter().position(|child| child.root == name) {
+                current = &mut current.leaves[pos];
+            } else {
+                let new_leaf = Tree::new(name.clone());
+                current.leaves.push(new_leaf);
+                let last = current.leaves.len() - 1;
+                current = &mut current.leaves[last];
+            }
+        }
+    }
 }
 
 /// Returns the file name or the string representation of the path.
