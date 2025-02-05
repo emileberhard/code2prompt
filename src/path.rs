@@ -116,7 +116,6 @@ pub fn traverse_directory(
         "!**/.hg/**",
         "!**/.DS_Store",
         "!**/.idea/**",
-        "!**/.vscode/**",
         "!**/*.swp",       // vim swap files
         "!**/.history/**",
         "!**/.cache/**",
