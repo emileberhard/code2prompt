@@ -489,7 +489,8 @@ fn setup_spinner(message: &str) -> ProgressBar {
 /// 
 /// Special handling:
 ///   - If the user literally writes "docker", we interpret that to include
-///     "Dockerfile", "docker-compose.yml", and "docker-compose.yaml".
+///     "**/Dockerfile", "**/docker-compose.yml", and "**/docker-compose.yaml"
+///     to match these files in any subdirectory.
 ///
 /// # Arguments
 ///
@@ -503,20 +504,20 @@ fn parse_patterns(patterns: &Option<String>) -> Vec<String> {
             let mut out = Vec::new();
             for item in patterns.split(',') {
                 let trimmed = item.trim();
-                // If the user typed `docker`, expand it to actual patterns 
+                // If the user typed `docker`, expand it to actual patterns with **/ prefix
                 if trimmed.eq_ignore_ascii_case("docker") {
-                    // Match Dockerfile, docker-compose.yml, docker-compose.yaml, etc.
-                    out.push("Dockerfile".to_string());
-                    out.push("docker-compose.yml".to_string());
-                    out.push("docker-compose.yaml".to_string());
+                    // Match Dockerfile and docker-compose files in any subdirectory
+                    out.push("**/Dockerfile".to_string());
+                    out.push("**/docker-compose.yml".to_string());
+                    out.push("**/docker-compose.yaml".to_string());
                 }
                 // If the item has a wildcard already, keep it as-is
                 else if trimmed.contains('*') {
                     out.push(trimmed.to_string());
                 }
-                // Else treat it like an extension and prefix with "*."
+                // Else treat it like an extension and add **/ prefix with *.
                 else {
-                    out.push(format!("*.{}", trimmed));
+                    out.push(format!("**/*.{}", trimmed));
                 }
             }
             out
