@@ -9,6 +9,7 @@ use std::{fs, path::Path};
 use termtree::Tree;
 use regex::Regex;
 use lazy_static::lazy_static;
+use glob::Pattern;
 
 lazy_static! {
     static ref BASE64_REGEX: Regex = Regex::new(r#"(?P<b64>[A-Za-z0-9+/=]{80,})"#).unwrap();
@@ -43,7 +44,7 @@ fn shorten_base64_in_ipynb(code: &str) -> String {
 /// * `root_path` - The path to the root directory.
 /// * `include_patterns` - The patterns of files to include.
 /// * `exclude_patterns` - The patterns of files to exclude.
-/// * `include_priority` - Whether to give priority to include patterns.
+/// * `_include_priority` - Whether to give priority to include patterns (deprecated).
 /// * `line_number` - Whether to add line numbers to the code.
 /// * `relative_paths` - Whether to use relative paths.
 /// * `exclude_from_tree` - Whether to exclude files from the tree.
@@ -104,7 +105,7 @@ pub fn traverse_directory(
         .ignore(true)
         .add_custom_ignore_filename(".c2pignore");
 
-    // Create override builder for include/exclude patterns
+    // Create override builder for default excludes + user excludes
     let mut override_builder = OverrideBuilder::new(&canonical_root_path);
 
     // 1) Add default excludes that will always apply
@@ -193,20 +194,15 @@ pub fn traverse_directory(
         override_builder.add(pattern)?;
     }
 
-    // 2) Handle user includes
-    for inc in include_patterns {
-        if inc.contains('*') {
-            override_builder.add(&format!("!{}", inc))?;
-        } else {
-            // If no wildcard, assume it's an extension
-            override_builder.add(&format!("!**/*.{}", inc))?;
-        }
-    }
-
-    // 3) Handle user excludes
+    // 2) Handle user excludes - make sure they're prefixed with !
     for exc in exclude_patterns {
         if exc.contains('*') {
-            override_builder.add(&format!("!{}", exc))?;
+            let exclude_pattern = if exc.starts_with('!') {
+                exc.to_string()
+            } else {
+                format!("!{}", exc)
+            };
+            override_builder.add(&exclude_pattern)?;
         } else {
             override_builder.add(&format!("!**/*.{}", exc))?;
         }
@@ -217,11 +213,33 @@ pub fn traverse_directory(
 
     let walker = builder.build();
 
+    // If --include patterns are provided, compile them once for use inside the loop.
+    let compiled_includes: Option<Vec<Pattern>> = if !include_patterns.is_empty() {
+        Some(
+            include_patterns
+                .iter()
+                .map(|pat| {
+                    if pat.eq_ignore_ascii_case("dockerfile") || pat.eq_ignore_ascii_case("docker") {
+                        Pattern::new("**/Dockerfile").unwrap_or_else(|_| Pattern::new("*").unwrap())
+                    } else if pat.eq_ignore_ascii_case("env") {
+                        Pattern::new("**/.env*").unwrap_or_else(|_| Pattern::new("*").unwrap())
+                    } else if pat.contains('*') || pat.contains('/') {
+                        Pattern::new(pat).unwrap_or_else(|_| Pattern::new("*").unwrap())
+                    } else {
+                        Pattern::new(&format!("**/*.{}", pat)).unwrap_or_else(|_| Pattern::new("*").unwrap())
+                    }
+                })
+                .collect()
+        )
+    } else {
+        None
+    };
+
     // Track tree and files
     let mut root = Tree::new(parent_directory.clone());
-    let mut files = Vec::new();
+    let mut collected_files = Vec::new();
 
-    // Traverse
+    // 3) Traverse, ignoring everything that matched default or user excludes
     for result in walker {
         let entry = match result {
             Ok(e) => e,
@@ -241,7 +259,16 @@ pub fn traverse_directory(
             Err(_) => path,
         };
 
-        // Build tree representation
+        // If include patterns were given, check the relative path.
+        // (We use the relative path as a string for matching.)
+        if let Some(ref patterns) = compiled_includes {
+            let rel_str = relative.to_str().unwrap_or("");
+            if !patterns.iter().any(|p| p.matches(rel_str)) {
+                continue; // skip this file because it doesn't match any include pattern
+            }
+        }
+
+        // Build tree representation if not excluded
         if !exclude_from_tree {
             add_path_to_tree(&mut root, relative);
         }
@@ -259,12 +286,7 @@ pub fn traverse_directory(
                 code = shorten_base64_in_ipynb(&code);
             }
 
-            let code_block = wrap_code_block(
-                &code,
-                extension,
-                line_number,
-                no_codeblock,
-            );
+            let code_block = wrap_code_block(&code, extension, line_number, no_codeblock);
 
             if !code.trim().is_empty() {
                 let file_path = if relative_paths {
@@ -273,7 +295,7 @@ pub fn traverse_directory(
                     path.display().to_string()
                 };
 
-                files.push(json!({
+                collected_files.push(json!({
                     "path": file_path,
                     "extension": extension,
                     "code": code_block,
@@ -288,7 +310,7 @@ pub fn traverse_directory(
         root.to_string()
     };
 
-    Ok((tree_str, files))
+    Ok((tree_str, collected_files))
 }
 
 /// Helper to nest a relative path in the tree structure
