@@ -419,17 +419,17 @@ fn main() -> Result<()> {
             "files": paths,
         });
         println!("{}", serde_json::to_string_pretty(&json_output)?);
-        return Ok(());
-    } else {
-        println!(
-            "{}{}{} Token count: {}, Model info: {}",
-            "[".bold().white(),
-            "i".bold().blue(),
-            "]".bold().white(),
-            token_count.to_string().bold().yellow(),
-            model_info
-        );
     }
+
+    // Always print token count info, regardless of mode
+    println!(
+        "{}{}{} Token count: {}, Model info: {}",
+        "[".bold().white(),
+        "i".bold().blue(),
+        "]".bold().white(),
+        token_count.to_string().bold().yellow(),
+        model_info
+    );
 
     // Copy to Clipboard
     if !args.no_clipboard {

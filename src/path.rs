@@ -41,14 +41,14 @@ fn shorten_base64_in_ipynb(code: &str) -> String {
 /// # Arguments
 ///
 /// * `root_path` - The path to the root directory.
-/// * `include` - The patterns of files to include.
-/// * `exclude` - The patterns of files to exclude.
+/// * `include_patterns` - The patterns of files to include.
+/// * `exclude_patterns` - The patterns of files to exclude.
 /// * `include_priority` - Whether to give priority to include patterns.
 /// * `line_number` - Whether to add line numbers to the code.
 /// * `relative_paths` - Whether to use relative paths.
 /// * `exclude_from_tree` - Whether to exclude files from the tree.
 /// * `no_codeblock` - Whether to not wrap the code block with a delimiter.
-/// * `c2pignore_patterns` - The patterns to exclude from the tree.
+/// * `_c2pignore_patterns` - Deprecated parameter, no longer used as ignore patterns are handled by the ignore crate.
 ///
 /// # Returns
 ///
@@ -56,14 +56,14 @@ fn shorten_base64_in_ipynb(code: &str) -> String {
 #[allow(clippy::too_many_arguments)]
 pub fn traverse_directory(
     root_path: &Path,
-    include: &[String],
-    exclude: &[String],
+    include_patterns: &[String],
+    exclude_patterns: &[String],
     _include_priority: bool,
     line_number: bool,
     relative_paths: bool,
     exclude_from_tree: bool,
     no_codeblock: bool,
-    _c2pignore_patterns: &[String],
+    _c2pignore_patterns: &[String], // Deprecated parameter
 ) -> Result<(String, Vec<serde_json::Value>)> {
     let canonical_root_path = root_path.canonicalize()?;
     let parent_directory = label(&canonical_root_path);
@@ -96,19 +96,105 @@ pub fn traverse_directory(
         return Ok((canonical_root_path.display().to_string(), files));
     }
 
-    // Directory case: Build WalkBuilder with c2pignore support
+    // Directory case: Build WalkBuilder with .c2pignore support
     let mut builder = WalkBuilder::new(&canonical_root_path);
     builder
         .hidden(false)
         .git_ignore(false)
         .ignore(true)
-        .add_custom_ignore_filename("c2pignore");
+        .add_custom_ignore_filename(".c2pignore");
 
     // Create override builder for include/exclude patterns
     let mut override_builder = OverrideBuilder::new(&canonical_root_path);
 
-    // Handle includes (force include with ! prefix)
-    for inc in include {
+    // 1) Add default excludes that will always apply
+    let default_excludes = vec![
+        // General "junk":
+        "**/.git/**",
+        "**/.svn/**",
+        "**/.hg/**",
+        "**/.DS_Store",
+        "**/.idea/**",
+        "**/.vscode/**",
+        "**/*.swp",       // vim swap files
+        "**/.history/**",
+        "**/.cache/**",
+        "**/tmp/**",
+        "**/temp/**",
+
+        // Python-related:
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/.mypy_cache/**",
+        "**/.venv/**",
+        "**/venv/**",
+        "**/.virtualenv/**",
+
+        // NodeJS / JS / TS:
+        "**/node_modules/**",
+        "**/npm-debug.log",
+        "**/yarn.lock",
+        "**/pnpm-lock.yaml",
+        "**/package-lock.json",  // Usually we only want `package.json`
+        "**/dist/**",
+        "**/build/**",
+        "**/out/**",
+
+        // Rust:
+        "**/target/**",
+        "**/Cargo.lock",          // Typically not super helpful to include
+        "**/.cargo/**",           // local cargo registry overrides, etc.
+
+        // Java / Maven / Gradle:
+        "**/target/**",           // also used by Java; might collide with Rust but that's okay
+        "**/.gradle/**",
+        "**/build/**",            // gradle "build" folder
+        "**/*.class",
+        "**/*.jar",
+        "**/*.war",
+
+        // Dotnet / C#:
+        "**/bin/**",
+        "**/obj/**",
+
+        // Docker & ephemeral:
+        "**/.docker/**",
+        "**/docker-compose.override.yml",
+        "**/docker-compose.override.yaml",
+
+        // Lockfiles from various toolchains:
+        "**/*.lock",
+        "**/Gemfile.lock",  // Ruby
+        "**/Pipfile.lock",  // Python pipenv
+
+        // Misc:
+        "**/*.log",         // large logfiles
+        "**/coverage/**",
+        "**/.nyc_output/**",
+        "**/.serverless/**",
+        "**/.aws-sam/**",
+        "**/.terraform/**",
+        "**/.next/**",      // Next.js
+        "**/.nuxt/**",      // Nuxt.js
+        "**/.angular/**",   // Angular CLI
+
+        // Binary/Object files:
+        "**/*.pyc",
+        "**/*.pyo",
+        "**/*.pyd",
+        "**/*.so",
+        "**/*.dylib",
+        "**/*.dll",
+        "**/*.exe",
+        "**/*.o",
+    ];
+
+    for pattern in default_excludes {
+        override_builder.add(pattern)?;
+    }
+
+    // 2) Handle user includes
+    for inc in include_patterns {
         if inc.contains('*') {
             override_builder.add(&format!("!{}", inc))?;
         } else {
@@ -117,8 +203,8 @@ pub fn traverse_directory(
         }
     }
 
-    // Handle excludes (normal pattern)
-    for exc in exclude {
+    // 3) Handle user excludes
+    for exc in exclude_patterns {
         if exc.contains('*') {
             override_builder.add(exc)?;
         } else {

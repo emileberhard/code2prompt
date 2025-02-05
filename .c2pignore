@@ -1,1 +1,58 @@
-target
+# Build directories
+target/
+build/
+dist/
+
+# Version control
+.git/
+.svn/
+.hg/
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+env/
+__pycache__/
+
+# Package files
+package-lock.json
+Cargo.lock
+yarn.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Binary/Object files
+*.exe
+*.dll
+*.so
+*.dylib
+*.o
+*.obj
+*.class
+*.pyc
+*.pyo
+*.pyd
+
+# IDE directories
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Media files (often large)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.mp4
+*.mov
+*.avi
