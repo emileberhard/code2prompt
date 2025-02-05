@@ -110,83 +110,83 @@ pub fn traverse_directory(
     // 1) Add default excludes that will always apply
     let default_excludes = vec![
         // General "junk":
-        "**/.git/**",
-        "**/.svn/**",
-        "**/.hg/**",
-        "**/.DS_Store",
-        "**/.idea/**",
-        "**/.vscode/**",
-        "**/*.swp",       // vim swap files
-        "**/.history/**",
-        "**/.cache/**",
-        "**/tmp/**",
-        "**/temp/**",
+        "!**/.git/**",
+        "!**/.svn/**",
+        "!**/.hg/**",
+        "!**/.DS_Store",
+        "!**/.idea/**",
+        "!**/.vscode/**",
+        "!**/*.swp",       // vim swap files
+        "!**/.history/**",
+        "!**/.cache/**",
+        "!**/tmp/**",
+        "!**/temp/**",
 
         // Python-related:
-        "**/__pycache__/**",
-        "**/.pytest_cache/**",
-        "**/.mypy_cache/**",
-        "**/.venv/**",
-        "**/venv/**",
-        "**/.virtualenv/**",
+        "!**/__pycache__/**",
+        "!**/.pytest_cache/**",
+        "!**/.mypy_cache/**",
+        "!**/.venv/**",
+        "!**/venv/**",
+        "!**/.virtualenv/**",
 
         // NodeJS / JS / TS:
-        "**/node_modules/**",
-        "**/npm-debug.log",
-        "**/yarn.lock",
-        "**/pnpm-lock.yaml",
-        "**/package-lock.json",  // Usually we only want `package.json`
-        "**/dist/**",
-        "**/build/**",
-        "**/out/**",
+        "!**/node_modules/**",
+        "!**/npm-debug.log",
+        "!**/yarn.lock",
+        "!**/pnpm-lock.yaml",
+        "!**/package-lock.json",  // Usually we only want `package.json`
+        "!**/dist/**",
+        "!**/build/**",
+        "!**/out/**",
 
         // Rust:
-        "**/target/**",
-        "**/Cargo.lock",          // Typically not super helpful to include
-        "**/.cargo/**",           // local cargo registry overrides, etc.
+        "!**/target/**",
+        "!**/Cargo.lock",          // Typically not super helpful to include
+        "!**/.cargo/**",           // local cargo registry overrides, etc.
 
         // Java / Maven / Gradle:
-        "**/target/**",           // also used by Java; might collide with Rust but that's okay
-        "**/.gradle/**",
-        "**/build/**",            // gradle "build" folder
-        "**/*.class",
-        "**/*.jar",
-        "**/*.war",
+        "!**/target/**",           // also used by Java; might collide with Rust but that's okay
+        "!**/.gradle/**",
+        "!**/build/**",            // gradle "build" folder
+        "!**/*.class",
+        "!**/*.jar",
+        "!**/*.war",
 
         // Dotnet / C#:
-        "**/bin/**",
-        "**/obj/**",
+        "!**/bin/**",
+        "!**/obj/**",
 
         // Docker & ephemeral:
-        "**/.docker/**",
-        "**/docker-compose.override.yml",
-        "**/docker-compose.override.yaml",
+        "!**/.docker/**",
+        "!**/docker-compose.override.yml",
+        "!**/docker-compose.override.yaml",
 
         // Lockfiles from various toolchains:
-        "**/*.lock",
-        "**/Gemfile.lock",  // Ruby
-        "**/Pipfile.lock",  // Python pipenv
+        "!**/*.lock",
+        "!**/Gemfile.lock",  // Ruby
+        "!**/Pipfile.lock",  // Python pipenv
 
         // Misc:
-        "**/*.log",         // large logfiles
-        "**/coverage/**",
-        "**/.nyc_output/**",
-        "**/.serverless/**",
-        "**/.aws-sam/**",
-        "**/.terraform/**",
-        "**/.next/**",      // Next.js
-        "**/.nuxt/**",      // Nuxt.js
-        "**/.angular/**",   // Angular CLI
+        "!**/*.log",         // large logfiles
+        "!**/coverage/**",
+        "!**/.nyc_output/**",
+        "!**/.serverless/**",
+        "!**/.aws-sam/**",
+        "!**/.terraform/**",
+        "!**/.next/**",      // Next.js
+        "!**/.nuxt/**",      // Nuxt.js
+        "!**/.angular/**",   // Angular CLI
 
         // Binary/Object files:
-        "**/*.pyc",
-        "**/*.pyo",
-        "**/*.pyd",
-        "**/*.so",
-        "**/*.dylib",
-        "**/*.dll",
-        "**/*.exe",
-        "**/*.o",
+        "!**/*.pyc",
+        "!**/*.pyo",
+        "!**/*.pyd",
+        "!**/*.so",
+        "!**/*.dylib",
+        "!**/*.dll",
+        "!**/*.exe",
+        "!**/*.o",
     ];
 
     for pattern in default_excludes {
@@ -206,9 +206,9 @@ pub fn traverse_directory(
     // 3) Handle user excludes
     for exc in exclude_patterns {
         if exc.contains('*') {
-            override_builder.add(exc)?;
+            override_builder.add(&format!("!{}", exc))?;
         } else {
-            override_builder.add(&format!("**/*.{}", exc))?;
+            override_builder.add(&format!("!**/*.{}", exc))?;
         }
     }
 
