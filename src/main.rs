@@ -158,6 +158,7 @@ fn main() -> Result<()> {
                     args.relative_paths,
                     false,      // exclude_from_tree
                     args.no_codeblock,
+                    &Vec::new(), // No c2pignore patterns for clipboard path
                 ) {
                     Ok((tree, mut dir_files)) => {
                         // Add directory tree as a special file
@@ -255,6 +256,9 @@ fn main() -> Result<()> {
     let include_patterns = parse_patterns(&args.include);
     let exclude_patterns = parse_patterns(&args.exclude);
 
+    // Load c2pignore patterns from the root path (if exists).
+    let c2pignore_patterns = load_c2pignore_patterns(args.path.as_ref().expect("Path is required when not using --read"))?;
+
     // Get the path and check if it exists
     let path = args.path.as_ref().expect("Path is required when not using --read");
     if !path.exists() {
@@ -279,6 +283,7 @@ fn main() -> Result<()> {
         args.relative_paths,
         args.exclude_from_tree,
         args.no_codeblock,
+        &c2pignore_patterns,
     )?;
 
     // Git operations (only for directories)
@@ -485,19 +490,38 @@ fn setup_spinner(message: &str) -> ProgressBar {
     spinner
 }
 
+/// Read patterns from a `c2pignore` file if it exists in the root path.
+/// These patterns override everything else and cause those files to be excluded,
+/// regardless of `--include` or `--exclude`.
+fn load_c2pignore_patterns(root_path: &PathBuf) -> Result<Vec<String>> {
+    let c2pignore_path = root_path.join("c2pignore");
+    if !c2pignore_path.exists() {
+        return Ok(vec![]);
+    }
+    // Read all lines as patterns
+    let contents = fs::read_to_string(&c2pignore_path)
+        .context("Failed to read c2pignore file")?;
+
+    let mut patterns = Vec::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        // Skip empty lines or # comments
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        patterns.push(trimmed.to_string());
+    }
+    Ok(patterns)
+}
+
 /// Parses comma-separated patterns into a vector of strings
 /// 
 /// Special handling:
 ///   - If the user literally writes "docker", we interpret that to include
 ///     "**/Dockerfile", "**/docker-compose.yml", and "**/docker-compose.yaml"
+///   - If the user writes "env", we interpret that to include
+///     "**/.env" and "**/.env.*"
 ///     to match these files in any subdirectory.
-///
-/// # Arguments
-///
-/// * `patterns` - An optional string containing comma-separated patterns
-///
-/// # Returns
-/// * `Vec<String>` - A vector of parsed patterns
 fn parse_patterns(patterns: &Option<String>) -> Vec<String> {
     match patterns {
         Some(patterns) if !patterns.is_empty() => {
@@ -506,10 +530,13 @@ fn parse_patterns(patterns: &Option<String>) -> Vec<String> {
                 let trimmed = item.trim();
                 // If the user typed `docker`, expand it to actual patterns with **/ prefix
                 if trimmed.eq_ignore_ascii_case("docker") {
-                    // Match Dockerfile and docker-compose files in any subdirectory
                     out.push("**/Dockerfile".to_string());
                     out.push("**/docker-compose.yml".to_string());
                     out.push("**/docker-compose.yaml".to_string());
+                } else if trimmed.eq_ignore_ascii_case("env") {
+                    // If the user typed `env`, match .env files
+                    out.push("**/.env".to_string());
+                    out.push("**/.env.*".to_string());
                 }
                 // If the item has a wildcard already, keep it as-is
                 else if trimmed.contains('*') {

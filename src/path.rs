@@ -47,6 +47,9 @@ fn shorten_base64_in_ipynb(code: &str) -> String {
 /// * `include_priority` - Whether to give priority to include patterns.
 /// * `line_number` - Whether to add line numbers to the code.
 /// * `relative_paths` - Whether to use relative paths.
+/// * `exclude_from_tree` - Whether to exclude files from the tree.
+/// * `no_codeblock` - Whether to not wrap the code block with a delimiter.
+/// * `c2pignore_patterns` - The patterns to exclude from the tree.
 ///
 /// # Returns
 ///
@@ -61,6 +64,7 @@ pub fn traverse_directory(
     relative_paths: bool,
     exclude_from_tree: bool,
     no_codeblock: bool,
+    c2pignore_patterns: &[String],
 ) -> Result<(String, Vec<serde_json::Value>)> {
     // ~~~ Initialization ~~~
     let mut files = Vec::new();
@@ -69,7 +73,7 @@ pub fn traverse_directory(
 
     // Handle single file case
     if canonical_root_path.is_file() {
-        if should_include_file(&canonical_root_path, include, exclude, include_priority) {
+        if should_include_file(&canonical_root_path, include, exclude, include_priority, c2pignore_patterns) {
             if let Ok(code_bytes) = fs::read(&canonical_root_path) {
                 let mut code = String::from_utf8_lossy(&code_bytes).to_string();
                 
@@ -113,7 +117,8 @@ pub fn traverse_directory(
 
     // ~~~ Build the Tree ~~~
     let tree = WalkBuilder::new(&canonical_root_path)
-        .git_ignore(true)
+        .hidden(false)
+        .git_ignore(false)
         .build()
         .filter_map(|e| e.ok())
         .fold(Tree::new(parent_directory.to_owned()), |mut root, entry| {
@@ -124,7 +129,7 @@ pub fn traverse_directory(
                     let component_str = component.as_os_str().to_string_lossy().to_string();
 
                     // Check if the current component should be excluded from the tree
-                    if exclude_from_tree && !should_include_file(path, include, exclude, include_priority) {
+                    if exclude_from_tree && !should_include_file(path, include, exclude, include_priority, c2pignore_patterns) {
                         break;
                     }
 
@@ -142,7 +147,15 @@ pub fn traverse_directory(
                 }
 
                 // ~~~ Process the file ~~~
-                if path.is_file() && should_include_file(path, include, exclude, include_priority) {
+                if path.is_file() 
+                    && should_include_file(
+                        path,
+                        include,
+                        exclude,
+                        include_priority,
+                        c2pignore_patterns,
+                    )
+                {
                     if let Ok(code_bytes) = fs::read(path) {
                         let mut code = String::from_utf8_lossy(&code_bytes).to_string();
                         

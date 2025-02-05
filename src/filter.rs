@@ -14,6 +14,7 @@ use std::path::Path;
 /// * `include_patterns` - A slice of strings representing the include patterns.
 /// * `exclude_patterns` - A slice of strings representing the exclude patterns.
 /// * `include_priority` - A boolean indicating whether to give priority to include patterns if both include and exclude patterns match.
+/// * `c2pignore_patterns` - Patterns loaded from c2pignore. If matched, we exclude unconditionally.
 ///
 /// # Returns
 ///
@@ -23,6 +24,7 @@ pub fn should_include_file(
     include_patterns: &[String],
     exclude_patterns: &[String],
     include_priority: bool,
+    c2pignore_patterns: &[String],
 ) -> bool {
     // ~~~ Clean path ~~~
     let canonical_path = match fs::canonicalize(path) {
@@ -33,6 +35,17 @@ pub fn should_include_file(
         }
     };
     let path_str = canonical_path.to_str().unwrap();
+
+    // ~~~ Check c2pignore patterns first ~~~
+    for pat in c2pignore_patterns {
+        if Pattern::new(pat).unwrap().matches(path_str) {
+            debug!(
+                "Path '{}' matched c2pignore pattern '{}'; excluded.",
+                path_str, pat
+            );
+            return false;
+        }
+    }
 
     // ~~~ Check glob patterns ~~~
     let included = include_patterns
