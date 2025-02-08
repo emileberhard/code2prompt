@@ -187,6 +187,68 @@ pub fn traverse_directory(
         "!**/*.dll",
         "!**/*.exe",
         "!**/*.o",
+
+        // Adding missing patterns from .c2pignore:
+        "!**/*.obj",         // Additional binary file pattern
+        "!**/Thumbs.db",     // Windows thumbnail cache
+        "!**/*.sqlite",      // Database files
+        "!**/*.db",          // Database files
+        
+        // Media files - Images:
+        "!**/*.png",
+        "!**/*.jpg",
+        "!**/*.jpeg",
+        "!**/*.gif",
+        "!**/*.ico",
+        "!**/*.bmp",
+        "!**/*.tiff",
+        "!**/*.tif",
+        "!**/*.webp",
+        "!**/*.svg",         // While SVG is text-based, it's primarily an image format
+        "!**/*.psd",         // Photoshop
+        "!**/*.ai",          // Adobe Illustrator
+        "!**/*.xcf",         // GIMP
+        
+        // Media files - Video:
+        "!**/*.mp4",
+        "!**/*.mov",
+        "!**/*.avi",
+        "!**/*.mkv",
+        "!**/*.wmv",
+        "!**/*.flv",
+        "!**/*.webm",
+        "!**/*.m4v",
+        "!**/*.3gp",
+        
+        // Media files - Audio:
+        "!**/*.mp3",
+        "!**/*.wav",
+        "!**/*.ogg",
+        "!**/*.m4a",
+        "!**/*.flac",
+        "!**/*.aac",
+        "!**/*.wma",
+        "!**/*.mid",
+        "!**/*.midi",
+        
+        // Media files - Documents and Archives:
+        "!**/*.pdf",
+        "!**/*.zip",
+        "!**/*.rar",
+        "!**/*.7z",
+        "!**/*.tar",
+        "!**/*.gz",
+        "!**/*.bz2",
+        "!**/*.xz",
+        "!**/*.doc",
+        "!**/*.docx",
+        "!**/*.ppt",
+        "!**/*.pptx",
+        "!**/*.xls",
+        "!**/*.xlsx",
+        
+        // IDE and Editor:
+        "!**/*.swo",         // Additional vim swap file pattern
     ];
 
     for pattern in default_excludes {
