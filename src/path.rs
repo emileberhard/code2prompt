@@ -15,16 +15,16 @@ lazy_static! {
     static ref BASE64_REGEX: Regex = Regex::new(r#"(?P<b64>[A-Za-z0-9+/=]{80,})"#).unwrap();
 }
 
-/// Shortens base64 strings in Jupyter notebook content
-/// 
+/// Shortens all base64 strings longer than 80 chars
+///
 /// # Arguments
-/// 
-/// * `code` - The content of the Jupyter notebook file
-/// 
+///
+/// * `code` - The file content to search for base64 substrings
+///
 /// # Returns
-/// 
+///
 /// * `String` - The content with shortened base64 strings
-fn shorten_base64_in_ipynb(code: &str) -> String {
+pub fn shorten_long_base64_strings(code: &str) -> String {
     BASE64_REGEX.replace_all(code, |caps: &regex::Captures| {
         let b64 = &caps["b64"];
         if b64.len() > 100 {
@@ -75,15 +75,13 @@ pub fn traverse_directory(
         if let Ok(code_bytes) = fs::read(&canonical_root_path) {
             let mut code = String::from_utf8_lossy(&code_bytes).to_string();
             code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
+            // Always shorten base64 strings (regardless of extension)
+            code = shorten_long_base64_strings(&code);
 
-            let extension = canonical_root_path.extension()
+            let extension = canonical_root_path
+                .extension()
                 .and_then(|ext| ext.to_str())
                 .unwrap_or("");
-
-            if extension == "ipynb" {
-                code = shorten_base64_in_ipynb(&code);
-            }
-
             let code_block = wrap_code_block(&code, extension, line_number, no_codeblock);
 
             if !code.trim().is_empty() {
@@ -339,14 +337,12 @@ pub fn traverse_directory(
             let mut code = String::from_utf8_lossy(&code_bytes).to_string();
             code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
 
+            // Always shorten base64 strings (regardless of extension)
+            code = shorten_long_base64_strings(&code);
+
             let extension = path.extension()
                 .and_then(|ext| ext.to_str())
                 .unwrap_or("");
-
-            if extension == "ipynb" {
-                code = shorten_base64_in_ipynb(&code);
-            }
-
             let code_block = wrap_code_block(&code, extension, line_number, no_codeblock);
 
             if !code.trim().is_empty() {

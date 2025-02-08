@@ -9,6 +9,7 @@ use code2prompt::{
     copy_to_clipboard, get_git_diff, get_git_diff_between_branches, get_git_log, get_model_info,
     get_tokenizer, handle_undefined_variables, handlebars_setup, label, read_paths_from_clipboard,
     render_template, traverse_directory, wrap_code_block, write_to_file,
+    path::shorten_long_base64_strings,
 };
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -138,12 +139,19 @@ fn main() -> Result<()> {
             if path.is_file() {
                 // Process single file
                 if let Ok(code_bytes) = fs::read(&path) {
-                    let code = String::from_utf8_lossy(&code_bytes);
-                    if !code.trim().is_empty() && !code.contains(char::REPLACEMENT_CHARACTER) {
+                    let mut code = String::from_utf8_lossy(&code_bytes).to_string();
+                    // sanitize replacement chars
+                    code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
+                    // always shorten base64
+                    code = shorten_long_base64_strings(&code);
+
+                    if !code.trim().is_empty() {
+                        let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+                        let wrapped = wrap_code_block(&code, extension, args.line_number, args.no_codeblock);
                         files.push(json!({
                             "path": path.display().to_string(),
-                            "extension": path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
-                            "code": wrap_code_block(&code, path.extension().and_then(|ext| ext.to_str()).unwrap_or(""), args.line_number, args.no_codeblock),
+                            "extension": extension,
+                            "code": wrapped,
                         }));
                     }
                 }
