@@ -221,10 +221,7 @@ fn main() -> Result<()> {
         handle_undefined_variables(&mut data, &template_content)?;
         let rendered = render_template(&handlebars, template_name, &data)?;
 
-        let folder_tag = folder
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("folder");
+        let folder_tag = code2prompt::path::label(folder);
         let wrapped = format!(
             "<{tag}>\n{indented}\n</{tag}>",
             tag = folder_tag,
