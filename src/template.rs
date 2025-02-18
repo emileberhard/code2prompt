@@ -172,8 +172,9 @@ pub fn write_to_file(output_path: &str, rendered: &str) -> Result<()> {
 ///
 /// * `Result<Vec<PathBuf>>` - Vector of parsed paths
 pub fn parse_paths_from_clipboard(content: &str) -> Result<Vec<PathBuf>> {
+    // Use .split_whitespace() to handle all spacing consistently
     let paths: Vec<PathBuf> = content
-        .split(|c| c == ' ' || c == '\n')
+        .split_whitespace()
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .filter(|p| p.exists()) // Only include paths that actually exist

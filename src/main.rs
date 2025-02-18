@@ -106,10 +106,9 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Cli::parse();
 
-    // If --read flag is present, process clipboard input (omitted for brevity).
     if args.read {
         let spinner = setup_spinner("Reading paths from clipboard...");
-        let _paths = match read_paths_from_clipboard() {
+        let paths = match read_paths_from_clipboard() {
             Ok(paths) => paths,
             Err(e) => {
                 spinner.finish_with_message("Failed!".red().to_string());
@@ -123,22 +122,27 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         };
-        // ... Existing clipboard processing logic ...
-        return Ok(());
+        spinner.finish_with_message("Done!".green().to_string());
+        return process_paths(&paths, &args);
     }
 
-    if args.paths.is_empty() {
+    // If not reading from clipboard, do normal CLI path processing
+    process_paths(&args.paths, &args)
+}
+
+fn process_paths(paths: &[PathBuf], args: &Cli) -> Result<()> {
+    if paths.is_empty() {
         return Err(anyhow::anyhow!("No paths provided."));
     }
 
     let include_patterns = parse_patterns(&args.include);
     let exclude_patterns = parse_patterns(&args.exclude);
 
-    let (template_content, template_name) = get_template(&args)?;
+    let (template_content, template_name) = get_template(args)?;
     let handlebars = handlebars_setup(&template_content, template_name)?;
 
     let mut folder_outputs = Vec::new();
-    for folder in &args.paths {
+    for folder in paths {
         if !folder.exists() {
             eprintln!(
                 "{}{}{} {}",
