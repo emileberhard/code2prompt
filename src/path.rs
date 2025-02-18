@@ -133,20 +133,20 @@ pub fn traverse_directory(
         "!**/npm-debug.log",
         "!**/yarn.lock",
         "!**/pnpm-lock.yaml",
-        "!**/package-lock.json",  // Usually we only want `package.json`
+        "!**/package-lock.json",
         "!**/dist/**",
         "!**/build/**",
         "!**/out/**",
 
         // Rust:
         "!**/target/**",
-        "!**/Cargo.lock",          // Typically not super helpful to include
-        "!**/.cargo/**",           // local cargo registry overrides, etc.
+        "!**/Cargo.lock",
+        "!**/.cargo/**",
 
         // Java / Maven / Gradle:
-        "!**/target/**",           // also used by Java; might collide with Rust but that's okay
+        "!**/target/**",
         "!**/.gradle/**",
-        "!**/build/**",            // gradle "build" folder
+        "!**/build/**",
         "!**/*.class",
         "!**/*.jar",
         "!**/*.war",
@@ -160,21 +160,21 @@ pub fn traverse_directory(
         "!**/docker-compose.override.yml",
         "!**/docker-compose.override.yaml",
 
-        // Lockfiles from various toolchains:
+        // Lockfiles:
         "!**/*.lock",
-        "!**/Gemfile.lock",  // Ruby
-        "!**/Pipfile.lock",  // Python pipenv
+        "!**/Gemfile.lock",
+        "!**/Pipfile.lock",
 
         // Misc:
-        "!**/*.log",         // large logfiles
+        "!**/*.log",
         "!**/coverage/**",
         "!**/.nyc_output/**",
         "!**/.serverless/**",
         "!**/.aws-sam/**",
         "!**/.terraform/**",
-        "!**/.next/**",      // Next.js
-        "!**/.nuxt/**",      // Nuxt.js
-        "!**/.angular/**",   // Angular CLI
+        "!**/.next/**",
+        "!**/.nuxt/**",
+        "!**/.angular/**",
 
         // Binary/Object files:
         "!**/*.pyc",
@@ -186,11 +186,11 @@ pub fn traverse_directory(
         "!**/*.exe",
         "!**/*.o",
 
-        // Adding missing patterns from .c2pignore:
-        "!**/*.obj",         // Additional binary file pattern
-        "!**/Thumbs.db",     // Windows thumbnail cache
-        "!**/*.sqlite",      // Database files
-        "!**/*.db",          // Database files
+        // Additional:
+        "!**/*.obj",
+        "!**/Thumbs.db",
+        "!**/*.sqlite",
+        "!**/*.db",
         
         // Media files - Images:
         "!**/*.png",
@@ -202,10 +202,10 @@ pub fn traverse_directory(
         "!**/*.tiff",
         "!**/*.tif",
         "!**/*.webp",
-        "!**/*.svg",         // While SVG is text-based, it's primarily an image format
-        "!**/*.psd",         // Photoshop
-        "!**/*.ai",          // Adobe Illustrator
-        "!**/*.xcf",         // GIMP
+        "!**/*.svg",
+        "!**/*.psd",
+        "!**/*.ai",
+        "!**/*.xcf",
         
         // Media files - Video:
         "!**/*.mp4",
@@ -246,14 +246,14 @@ pub fn traverse_directory(
         "!**/*.xlsx",
         
         // IDE and Editor:
-        "!**/*.swo",         // Additional vim swap file pattern
+        "!**/*.swo",
     ];
 
     for pattern in default_excludes {
         override_builder.add(pattern)?;
     }
 
-    // 2) Handle user excludes - make sure they're prefixed with !
+    // 2) Handle user excludes - ensure they're prefixed with !
     for exc in exclude_patterns {
         if exc.contains('*') {
             let exclude_pattern = if exc.starts_with('!') {
@@ -279,13 +279,16 @@ pub fn traverse_directory(
                 .iter()
                 .map(|pat| {
                     if pat.eq_ignore_ascii_case("dockerfile") || pat.eq_ignore_ascii_case("docker") {
-                        Pattern::new("**/Dockerfile").unwrap_or_else(|_| Pattern::new("*").unwrap())
+                        Pattern::new("**/Dockerfile")
+                            .unwrap_or_else(|_| Pattern::new("*").unwrap())
                     } else if pat.eq_ignore_ascii_case("env") {
-                        Pattern::new("**/.env*").unwrap_or_else(|_| Pattern::new("*").unwrap())
+                        Pattern::new("**/.env*")
+                            .unwrap_or_else(|_| Pattern::new("*").unwrap())
                     } else if pat.contains('*') || pat.contains('/') {
                         Pattern::new(pat).unwrap_or_else(|_| Pattern::new("*").unwrap())
                     } else {
-                        Pattern::new(&format!("**/*.{}", pat)).unwrap_or_else(|_| Pattern::new("*").unwrap())
+                        Pattern::new(&format!("**/*.{}", pat))
+                            .unwrap_or_else(|_| Pattern::new("*").unwrap())
                     }
                 })
                 .collect()
@@ -294,11 +297,10 @@ pub fn traverse_directory(
         None
     };
 
-    // Track tree and files
     let mut root = Tree::new(parent_directory.clone());
     let mut collected_files = Vec::new();
 
-    // 3) Traverse, ignoring everything that matched default or user excludes
+    // 3) Traverse files
     for result in walker {
         let entry = match result {
             Ok(e) => e,
@@ -318,29 +320,33 @@ pub fn traverse_directory(
             Err(_) => path,
         };
 
-        // If include patterns were given, check the relative path.
-        // (We use the relative path as a string for matching.)
-        if let Some(ref patterns) = compiled_includes {
-            let rel_str = relative.to_str().unwrap_or("");
-            if !patterns.iter().any(|p| p.matches(rel_str)) {
-                continue; // skip this file because it doesn't match any include pattern
-            }
+        // Always add file to the tree (if not excluded) if the file is within depth 2.
+        if !exclude_from_tree && relative.components().count() <= 2 {
+            add_path_to_tree(&mut root, relative);
         }
 
-        // Build tree representation if not excluded
-        if !exclude_from_tree {
-            add_path_to_tree(&mut root, relative);
+        // Determine whether to process the file based on include patterns.
+        let file_matches_include = if let Some(ref patterns) = compiled_includes {
+            let rel_str = relative.to_str().unwrap_or("");
+            patterns.iter().any(|p| p.matches(rel_str))
+        } else {
+            true
+        };
+
+        // Only process files (for content extraction) that match the include patterns.
+        if !file_matches_include {
+            continue;
         }
 
         // Process file content
         if let Ok(code_bytes) = fs::read(path) {
             let mut code = String::from_utf8_lossy(&code_bytes).to_string();
             code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
-
             // Always shorten base64 strings (regardless of extension)
             code = shorten_long_base64_strings(&code);
 
-            let extension = path.extension()
+            let extension = path
+                .extension()
                 .and_then(|ext| ext.to_str())
                 .unwrap_or("");
             let code_block = wrap_code_block(&code, extension, line_number, no_codeblock);
