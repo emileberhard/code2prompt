@@ -310,59 +310,65 @@ pub fn traverse_directory(
             }
         };
 
-        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-            continue;
-        }
-
         let path = entry.path();
         let relative = match path.strip_prefix(&canonical_root_path) {
             Ok(r) => r,
             Err(_) => path,
         };
 
-        // Always add file to the tree (if not excluded) if the file is within depth 2.
-        if !exclude_from_tree && relative.components().count() <= 2 {
-            add_path_to_tree(&mut root, relative);
-        }
-
-        // Determine whether to process the file based on include patterns.
+        // Check if path matches an --include pattern
         let file_matches_include = if let Some(ref patterns) = compiled_includes {
             let rel_str = relative.to_str().unwrap_or("");
             patterns.iter().any(|p| p.matches(rel_str))
         } else {
-            true
+            true // If no --include given, everything is included
         };
 
-        // Only process files (for content extraction) that match the include patterns.
-        if !file_matches_include {
+        // Determine the "depth" by component count
+        let depth = relative.components().count();
+
+        // 1) Add item (file or directory) to the tree if:
+        //    - It's included, OR
+        //    - The depth is <= 3
+        if !exclude_from_tree {
+            if file_matches_include || depth <= 3 {
+                add_path_to_tree(&mut root, relative);
+            }
+        }
+
+        // 2) If it's a directory, don't read its contents into "collected_files"
+        //    We only do that for actual files below:
+        if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
             continue;
         }
 
-        // Process file content
-        if let Ok(code_bytes) = fs::read(path) {
-            let mut code = String::from_utf8_lossy(&code_bytes).to_string();
-            code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
-            // Always shorten base64 strings (regardless of extension)
-            code = shorten_long_base64_strings(&code);
+        // 3) If it's a file that is actually included, read its content
+        if file_matches_include {
+            if let Ok(code_bytes) = fs::read(path) {
+                let mut code = String::from_utf8_lossy(&code_bytes).to_string();
+                code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
+                // Always shorten base64 strings (regardless of extension)
+                code = shorten_long_base64_strings(&code);
 
-            let extension = path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .unwrap_or("");
-            let code_block = wrap_code_block(&code, extension, line_number, no_codeblock);
+                let extension = path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("");
+                let code_block = wrap_code_block(&code, extension, line_number, no_codeblock);
 
-            if !code.trim().is_empty() {
-                let file_path = if relative_paths {
-                    format!("{}/{}", parent_directory, relative.display())
-                } else {
-                    path.display().to_string()
-                };
+                if !code.trim().is_empty() {
+                    let file_path = if relative_paths {
+                        format!("{}/{}", parent_directory, relative.display())
+                    } else {
+                        path.display().to_string()
+                    };
 
-                collected_files.push(json!({
-                    "path": file_path,
-                    "extension": extension,
-                    "code": code_block,
-                }));
+                    collected_files.push(json!({
+                        "path": file_path,
+                        "extension": extension,
+                        "code": code_block,
+                    }));
+                }
             }
         }
     }
