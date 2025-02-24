@@ -30,75 +30,75 @@ struct Cli {
     paths: Vec<PathBuf>,
 
     /// File extensions to include (comma-separated)
-    #[clap(short = 'i', long)]
+    #[clap(short = 'i', long, help = "Comma-separated patterns of files to include\n(e.g. *.py,**/src/**)")]
     include: Option<String>,
 
     /// Patterns to exclude
-    #[clap(long)]
+    #[clap(long, help = "Comma-separated patterns to exclude files from final output\n(e.g. *.txt, *.md)")]
     exclude: Option<String>,
 
     /// Include files in case of conflict between include and exclude patterns
-    #[clap(long)]
+    #[clap(long, help = "If a file matches both --include and --exclude, favor \"include\"")]
     include_priority: bool,
 
     /// Exclude files/folders from the source tree based on exclude patterns
-    #[clap(long)]
+    #[clap(long, help = "Exclude files/folders from the source tree (they won't appear in\nthe tree listing, but might still be included if they're matched\nby --include)")]
     exclude_from_tree: bool,
 
     /// Optional tokenizer to use for token count (cl100k default)
-    #[clap(short = 'c', long)]
+    #[clap(short = 'c', long, help = "Optional tokenizer to use for token count (default is \"cl100k\")\nValid choices: cl100k, p50k, p50k_edit, r50k, gpt2")]
     encoding: Option<String>,
 
     /// Optional output file path
-    #[clap(short, long)]
+    #[clap(short, long, help = "Write final result to this file (instead of / in addition to\ncopying to clipboard)")]
     output: Option<String>,
 
     /// Include git diff
-    #[clap(short, long)]
+    #[clap(short, long, help = "Include git diff (staged changes) from the repo at PATHS")]
     diff: bool,
 
     /// Generate git diff between two branches
-    #[clap(long, value_name = "BRANCHES")]
+    #[clap(long, value_name = "BRANCHES", help = "Generate a git diff between two branches (comma-separated)\n(e.g. --git-diff-branch=\"main,development\")")]
     git_diff_branch: Option<String>,
 
     /// Retrieve git log between two branches
-    #[clap(long, value_name = "BRANCHES")]
+    #[clap(long, value_name = "BRANCHES", help = "Retrieve git log between two branches (comma-separated)\n(e.g. --git-log-branch=\"main,development\")")]
     git_log_branch: Option<String>,
 
     /// Add line numbers to the source code
-    #[clap(short, long)]
+    #[clap(short, long, help = "Add line numbers to the source code in the output")]
     line_number: bool,
 
     /// Disable wrapping code inside markdown code blocks
-    #[clap(long)]
+    #[clap(long, help = "Do not wrap the code blocks in triple-backtick fences")]
     no_codeblock: bool,
 
     /// Use relative paths instead of absolute paths, including the parent directory
-    #[clap(long)]
+    #[clap(long, help = "Use relative paths in the final listing (prefixed by the parent\ndirectory name)")]
     relative_paths: bool,
 
     /// Disable copying to clipboard
-    #[clap(long)]
+    #[clap(long, help = "Disable copying the final output to the clipboard")]
     no_clipboard: bool,
 
     /// Append to clipboard instead of overwriting
-    #[clap(short, long)]
+    #[clap(short, long, help = "Append the generated output to existing clipboard content\n(instead of overwriting)")]
     append: bool,
 
     /// Optional path to a custom Handlebars template
-    #[clap(short, long)]
+    #[clap(short, long, help = "Path to a custom Handlebars template file")]
     template: Option<PathBuf>,
 
     /// Print output as JSON (ignored – final output is not printed)
-    #[clap(long)]
+    #[clap(long, help = "(Placeholder) Print output as JSON\n(Currently ignored - no final JSON is printed)")]
     json: bool,
 
     /// Read paths from clipboard
-    #[clap(long)]
+    #[clap(long, help = "Read paths from clipboard (instead of specifying them directly on\nthe command line)")]
     read: bool,
 
     /// Sampling rate (defaults to 10 if flag present without a value)
-    #[clap(short = 's', long = "sample-rate", default_missing_value = "10")]
+    #[clap(short = 's', long = "sample-rate", default_missing_value = "10", help = "Provide a sampling rate (integer). Defaults to 10 if the flag is used\nwithout specifying a value.")]
     sample_rate: Option<u8>,
 }
 
