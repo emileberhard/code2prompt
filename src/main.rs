@@ -6,9 +6,9 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use code2prompt::{
-    copy_to_clipboard, get_git_diff, get_git_diff_between_branches, get_git_log, get_model_info,
-    get_tokenizer, handle_undefined_variables, handlebars_setup, label, read_paths_from_clipboard,
-    render_template, traverse_directory, write_to_file,
+    copy_file_to_clipboard, copy_to_clipboard, get_git_diff, get_git_diff_between_branches,
+    get_git_log, get_model_info, get_tokenizer, handle_undefined_variables, handlebars_setup,
+    label, read_paths_from_clipboard, render_template, traverse_directory, write_to_file,
 };
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -81,8 +81,21 @@ struct Cli {
     #[clap(long, help = "Disable copying the final output to the clipboard")]
     no_clipboard: bool,
 
+    /// Copy output as a `context.txt` file on the clipboard instead of plain text
+    #[clap(
+        short = 'f',
+        long,
+        help = "Write output to a context.txt file and copy that file to the clipboard (where supported)"
+    )]
+    file: bool,
+
     /// Append to clipboard instead of overwriting
-    #[clap(short, long, help = "Append the generated output to existing clipboard content\n(instead of overwriting)")]
+    #[clap(
+        short,
+        long,
+        help = "Append the generated output to existing clipboard content\n(instead of overwriting)",
+        conflicts_with = "file"
+    )]
     append: bool,
 
     /// Optional path to a custom Handlebars template
@@ -254,28 +267,67 @@ fn process_paths(paths: &[PathBuf], args: &Cli) -> Result<()> {
         model_info
     );
 
-    // Do not print the final output; only copy to clipboard.
+    // Optionally materialize the output into a context.txt file
+    let mut context_file_path: Option<PathBuf> = None;
+    if args.file {
+        let path = write_context_file(&final_output)?;
+        context_file_path = Some(path);
+    }
+
+    // Clipboard behaviour:
+    // - default: copy text as before
+    // - with --file: copy context.txt as a file (macOS/Windows) or fall back to text
     if !args.no_clipboard {
-        if let Err(e) = copy_to_clipboard(&final_output, args.append) {
-            eprintln!(
-                "{}{}{} {}",
-                "[".bold().white(),
-                "!".bold().red(),
-                "]".bold().white(),
-                format!("Failed to copy to clipboard: {}", e).red()
-            );
-        } else {
-            println!(
-                "{}{}{} {}",
-                "[".bold().white(),
-                "✓".bold().green(),
-                "]".bold().white(),
-                if args.append {
-                    "Appended to clipboard successfully.".green()
+        if args.file {
+            if let Some(path) = &context_file_path {
+                if let Err(e) = copy_file_to_clipboard(path) {
+                    eprintln!(
+                        "{}{}{} {}",
+                        "[".bold().white(),
+                        "!".bold().red(),
+                        "]".bold().white(),
+                        format!(
+                            "Failed to copy context.txt file to clipboard: {}",
+                            e
+                        )
+                        .red()
+                    );
                 } else {
-                    "Copied to clipboard successfully.".green()
+                    println!(
+                        "{}{}{} {}",
+                        "[".bold().white(),
+                        "✓".bold().green(),
+                        "]".bold().white(),
+                        format!(
+                            "context.txt copied to clipboard as a file: {}",
+                            path.display()
+                        )
+                        .green()
+                    );
                 }
-            );
+            }
+        } else {
+            if let Err(e) = copy_to_clipboard(&final_output, args.append) {
+                eprintln!(
+                    "{}{}{} {}",
+                    "[".bold().white(),
+                    "!".bold().red(),
+                    "]".bold().white(),
+                    format!("Failed to copy to clipboard: {}", e).red()
+                );
+            } else {
+                println!(
+                    "{}{}{} {}",
+                    "[".bold().white(),
+                    "✓".bold().green(),
+                    "]".bold().white(),
+                    if args.append {
+                        "Appended to clipboard successfully.".green()
+                    } else {
+                        "Copied to clipboard successfully.".green()
+                    }
+                );
+            }
         }
     }
 
@@ -307,6 +359,28 @@ fn setup_spinner(message: &str) -> ProgressBar {
     );
     spinner.set_message(message.to_string());
     spinner
+}
+
+/// Writes the final output to a context.txt file in the system temp directory.
+///
+/// Returns the full path to the created file.
+fn write_context_file(rendered: &str) -> Result<PathBuf> {
+    let mut context_path = std::env::temp_dir();
+    context_path.push("context.txt");
+
+    fs::write(&context_path, rendered).with_context(|| {
+        format!("Failed to write context.txt at {}", context_path.display())
+    })?;
+
+    println!(
+        "{}{}{} {}",
+        "[".bold().white(),
+        "✓".bold().green(),
+        "]".bold().white(),
+        format!("Context written to file: {}", context_path.display()).green()
+    );
+
+    Ok(context_path)
 }
 
 /// Reads patterns from a `c2pignore` file if it exists in the given folder.

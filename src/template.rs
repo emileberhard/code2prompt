@@ -8,7 +8,7 @@ use handlebars::{no_escape, Handlebars};
 use inquire::Text;
 use regex::Regex;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Set up the Handlebars template engine with a template string and a template name.
 ///
@@ -128,7 +128,7 @@ pub fn copy_to_clipboard(rendered: &str, append: bool) -> Result<()> {
             } else {
                 rendered.to_string()
             };
-            
+
             clipboard
                 .set_text(content)
                 .context("Failed to copy to clipboard")?;
@@ -136,6 +136,113 @@ pub fn copy_to_clipboard(rendered: &str, append: bool) -> Result<()> {
         }
         Err(e) => Err(anyhow::anyhow!("Failed to initialize clipboard: {}", e)),
     }
+}
+
+/// Copies a file as a file reference to the clipboard where supported.
+///
+/// On macOS and Windows this behaves like copying the file from the file
+/// manager (Finder / Explorer). On other platforms it falls back to copying
+/// the file contents as plain text.
+pub fn copy_file_to_clipboard(path: &Path) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        copy_file_to_clipboard_macos(path)
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        copy_file_to_clipboard_windows(path)
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        copy_file_to_clipboard_fallback(path)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn copy_file_to_clipboard_macos(path: &Path) -> Result<()> {
+    use std::process::Command;
+
+    let abs = path
+        .canonicalize()
+        .with_context(|| format!("Failed to canonicalize context file path: {}", path.display()))?;
+
+    let path_str = abs
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Context file path is not valid UTF-8: {}", abs.display()))?;
+
+    let escaped = escape_osascript_string(path_str);
+
+    // Equivalent to manually doing: osascript -e 'tell app "Finder" to set the clipboard
+    // to ( POSIX file "/absolute/path/context.txt" )'
+    let script = format!(
+        r#"tell application "Finder" to set the clipboard to (POSIX file "{}")"#,
+        escaped
+    );
+
+    let status = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .status()
+        .context("Failed to execute osascript to copy context.txt as file")?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!(
+            "osascript exited with non-zero status: {}",
+            status
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn escape_osascript_string(input: &str) -> String {
+    input.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[cfg(target_os = "windows")]
+fn copy_file_to_clipboard_windows(path: &Path) -> Result<()> {
+    use std::process::Command;
+
+    let abs = path
+        .canonicalize()
+        .with_context(|| format!("Failed to canonicalize context file path: {}", path.display()))?;
+
+    let path_str = abs
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Context file path is not valid UTF-8: {}", abs.display()))?;
+
+    // Use PowerShell's Set-Clipboard with a FileDropList so Explorer and other
+    // apps see this as a file copied to the clipboard.
+    let mut cmd = Command::new("powershell");
+    cmd.arg("-NoLogo")
+        .arg("-NoProfile")
+        .arg("-Command")
+        .arg("Get-Item -LiteralPath $env:CODE2PROMPT_CONTEXT_FILE | Set-Clipboard")
+        .env("CODE2PROMPT_CONTEXT_FILE", path_str);
+
+    let status = cmd
+        .status()
+        .context("Failed to execute PowerShell to copy context.txt as file")?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!(
+            "PowerShell exited with non-zero status: {}",
+            status
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn copy_file_to_clipboard_fallback(path: &Path) -> Result<()> {
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read context file: {}", path.display()))?;
+    // Best-effort: fall back to copying the file contents as text
+    copy_to_clipboard(&contents, false)
 }
 
 /// Writes the rendered template to a specified output file.
