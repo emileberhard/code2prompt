@@ -10,6 +10,7 @@ use code2prompt::{
     get_git_log, get_model_info, get_tokenizer, handle_undefined_variables, handlebars_setup,
     label, read_paths_from_clipboard, render_template, traverse_directory, write_to_file,
 };
+use chrono::Local;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error};
@@ -366,10 +367,24 @@ fn setup_spinner(message: &str) -> ProgressBar {
 /// Returns the full path to the created file.
 fn write_context_file(rendered: &str) -> Result<PathBuf> {
     let mut context_path = std::env::temp_dir();
-    context_path.push("context.txt");
+
+    // Get the current working directory name
+    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
+    let dir_name = current_dir
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("codebase"))
+        .to_string_lossy();
+
+    // Get current time in ISO format (using dashes for time to be Windows-safe)
+    let timestamp = Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+
+    // Construct the filename: <workingdir>_context_<ISO_DateTime>.txt
+    let filename = format!("{}_context_{}.txt", dir_name, timestamp);
+
+    context_path.push(filename);
 
     fs::write(&context_path, rendered).with_context(|| {
-        format!("Failed to write context.txt at {}", context_path.display())
+        format!("Failed to write context file at {}", context_path.display())
     })?;
 
     println!(
