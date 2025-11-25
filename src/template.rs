@@ -154,23 +154,88 @@ pub fn copy_file_to_clipboard(path: &Path) -> Result<()> {
         copy_file_to_clipboard_windows(path)
     }
 
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    #[cfg(target_os = "linux")]
+    {
+        copy_file_to_clipboard_linux(path)
+    }
+
+    #[cfg(all(
+        not(target_os = "macos"),
+        not(target_os = "windows"),
+        not(target_os = "linux")
+    ))]
     {
         copy_file_to_clipboard_fallback(path)
     }
+}
+
+#[cfg(target_os = "linux")]
+fn copy_file_to_clipboard_linux(path: &Path) -> Result<()> {
+    use std::process::{Command, Stdio};
+
+    let abs = path.canonicalize().with_context(|| {
+        format!(
+            "Failed to canonicalize context file path: {}",
+            path.display()
+        )
+    })?;
+
+    // Linux clipboard utilities expect a URI when copying files.
+    let uri = format!("file://{}", abs.display());
+
+    // Attempt Wayland clipboard first.
+    if let Ok(status) = Command::new("wl-copy")
+        .arg("--type")
+        .arg("text/uri-list")
+        .arg(&uri)
+        .status()
+    {
+        if status.success() {
+            return Ok(());
+        }
+    }
+
+    // Fallback to X11 clipboard via xclip.
+    let mut child = Command::new("xclip")
+        .arg("-selection")
+        .arg("clipboard")
+        .arg("-t")
+        .arg("text/uri-list")
+        .stdin(Stdio::piped())
+        .spawn()
+        .context(
+            "Failed to spawn clipboard utility. Please install 'wl-clipboard' (Wayland) or 'xclip' (X11).",
+        )?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        write!(stdin, "{}", uri).context("Failed to write to xclip stdin")?;
+    }
+
+    let status = child.wait().context("Failed to wait for xclip")?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!(
+            "Clipboard utility exited with non-zero status"
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
 fn copy_file_to_clipboard_macos(path: &Path) -> Result<()> {
     use std::process::Command;
 
-    let abs = path
-        .canonicalize()
-        .with_context(|| format!("Failed to canonicalize context file path: {}", path.display()))?;
+    let abs = path.canonicalize().with_context(|| {
+        format!(
+            "Failed to canonicalize context file path: {}",
+            path.display()
+        )
+    })?;
 
-    let path_str = abs
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("Context file path is not valid UTF-8: {}", abs.display()))?;
+    let path_str = abs.to_str().ok_or_else(|| {
+        anyhow::anyhow!("Context file path is not valid UTF-8: {}", abs.display())
+    })?;
 
     let escaped = escape_osascript_string(path_str);
 
@@ -206,13 +271,16 @@ fn escape_osascript_string(input: &str) -> String {
 fn copy_file_to_clipboard_windows(path: &Path) -> Result<()> {
     use std::process::Command;
 
-    let abs = path
-        .canonicalize()
-        .with_context(|| format!("Failed to canonicalize context file path: {}", path.display()))?;
+    let abs = path.canonicalize().with_context(|| {
+        format!(
+            "Failed to canonicalize context file path: {}",
+            path.display()
+        )
+    })?;
 
-    let path_str = abs
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("Context file path is not valid UTF-8: {}", abs.display()))?;
+    let path_str = abs.to_str().ok_or_else(|| {
+        anyhow::anyhow!("Context file path is not valid UTF-8: {}", abs.display())
+    })?;
 
     // Use PowerShell's Set-Clipboard with a FileDropList so Explorer and other
     // apps see this as a file copied to the clipboard.
@@ -299,10 +367,10 @@ pub fn parse_paths_from_clipboard(content: &str) -> Result<Vec<PathBuf>> {
 /// # Returns
 /// * `Result<Vec<PathBuf>>` - Vector of paths read from clipboard
 pub fn read_paths_from_clipboard() -> Result<Vec<PathBuf>> {
-    let mut clipboard = Clipboard::new()
-        .context("Failed to initialize clipboard")?;
-    
-    let content = clipboard.get_text()
+    let mut clipboard = Clipboard::new().context("Failed to initialize clipboard")?;
+
+    let content = clipboard
+        .get_text()
         .context("Failed to get text from clipboard")?;
 
     parse_paths_from_clipboard(&content)
