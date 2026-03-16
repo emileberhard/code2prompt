@@ -191,60 +191,61 @@ pub fn traverse_directory(
         "!**/Thumbs.db",
         "!**/*.sqlite",
         "!**/*.db",
-        
-        // Media files - Images:
-        "!**/*.png",
-        "!**/*.jpg",
-        "!**/*.jpeg",
-        "!**/*.gif",
-        "!**/*.ico",
-        "!**/*.bmp",
-        "!**/*.tiff",
-        "!**/*.tif",
-        "!**/*.webp",
-        "!**/*.svg",
-        "!**/*.psd",
-        "!**/*.ai",
-        "!**/*.xcf",
-        
-        // Media files - Video:
-        "!**/*.mp4",
-        "!**/*.mov",
-        "!**/*.avi",
-        "!**/*.mkv",
-        "!**/*.wmv",
-        "!**/*.flv",
-        "!**/*.webm",
-        "!**/*.m4v",
-        "!**/*.3gp",
-        
-        // Media files - Audio:
-        "!**/*.mp3",
-        "!**/*.wav",
-        "!**/*.ogg",
-        "!**/*.m4a",
-        "!**/*.flac",
-        "!**/*.aac",
-        "!**/*.wma",
-        "!**/*.mid",
-        "!**/*.midi",
-        
-        // Media files - Documents and Archives:
-        "!**/*.pdf",
-        "!**/*.zip",
-        "!**/*.rar",
-        "!**/*.7z",
-        "!**/*.tar",
-        "!**/*.gz",
-        "!**/*.bz2",
-        "!**/*.xz",
-        "!**/*.doc",
-        "!**/*.docx",
-        "!**/*.ppt",
-        "!**/*.pptx",
-        "!**/*.xls",
-        "!**/*.xlsx",
-        
+
+        // COMMENTED OUT - Media files now appear in tree but content is not read
+        // // Media files - Images:
+        // "!**/*.png",
+        // "!**/*.jpg",
+        // "!**/*.jpeg",
+        // "!**/*.gif",
+        // "!**/*.ico",
+        // "!**/*.bmp",
+        // "!**/*.tiff",
+        // "!**/*.tif",
+        // "!**/*.webp",
+        // "!**/*.svg",
+        // "!**/*.psd",
+        // "!**/*.ai",
+        // "!**/*.xcf",
+
+        // // Media files - Video:
+        // "!**/*.mp4",
+        // "!**/*.mov",
+        // "!**/*.avi",
+        // "!**/*.mkv",
+        // "!**/*.wmv",
+        // "!**/*.flv",
+        // "!**/*.webm",
+        // "!**/*.m4v",
+        // "!**/*.3gp",
+
+        // // Media files - Audio:
+        // "!**/*.mp3",
+        // "!**/*.wav",
+        // "!**/*.ogg",
+        // "!**/*.m4a",
+        // "!**/*.flac",
+        // "!**/*.aac",
+        // "!**/*.wma",
+        // "!**/*.mid",
+        // "!**/*.midi",
+
+        // // Media files - Documents and Archives:
+        // "!**/*.pdf",
+        // "!**/*.zip",
+        // "!**/*.rar",
+        // "!**/*.7z",
+        // "!**/*.tar",
+        // "!**/*.gz",
+        // "!**/*.bz2",
+        // "!**/*.xz",
+        // "!**/*.doc",
+        // "!**/*.docx",
+        // "!**/*.ppt",
+        // "!**/*.pptx",
+        // "!**/*.xls",
+        // "!**/*.xlsx",
+
         // IDE and Editor:
         "!**/*.swo",
     ];
@@ -300,6 +301,15 @@ pub fn traverse_directory(
     let mut root = Tree::new(parent_directory.clone());
     let mut collected_files = Vec::new();
 
+    // Define extensions we want in the tree but NOT in the context
+    let binary_extensions = vec![
+        "png", "jpg", "jpeg", "gif", "ico", "bmp", "tiff", "tif", "webp", "svg", "psd", "ai", "xcf",
+        "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v", "3gp",
+        "mp3", "wav", "ogg", "m4a", "flac", "aac", "wma", "mid", "midi",
+        "pdf", "zip", "rar", "7z", "tar", "gz", "bz2", "xz",
+        "doc", "docx", "ppt", "pptx", "xls", "xlsx"
+    ];
+
     // 3) Traverse files
     for result in walker {
         let entry = match result {
@@ -315,6 +325,14 @@ pub fn traverse_directory(
             Ok(r) => r,
             Err(_) => path,
         };
+
+        // Get extension early and check if binary
+        let extension = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let is_binary = binary_extensions.contains(&extension.as_str());
 
         // Check if path matches an --include pattern
         let file_matches_include = if let Some(ref patterns) = compiled_includes {
@@ -342,19 +360,15 @@ pub fn traverse_directory(
             continue;
         }
 
-        // 3) If it's a file that is actually included, read its content
-        if file_matches_include {
+        // 3) If it's a file that is actually included AND not binary, read its content
+        if file_matches_include && !is_binary {
             if let Ok(code_bytes) = fs::read(path) {
                 let mut code = String::from_utf8_lossy(&code_bytes).to_string();
                 code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
                 // Always shorten base64 strings (regardless of extension)
                 code = shorten_long_base64_strings(&code);
 
-                let extension = path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("");
-                let code_block = wrap_code_block(&code, extension, line_number, no_codeblock);
+                let code_block = wrap_code_block(&code, &extension, line_number, no_codeblock);
 
                 if !code.trim().is_empty() {
                     let file_path = if relative_paths {
