@@ -9,7 +9,7 @@
 
 - **Source tree** (optional)
 - **Rich code inclusion** (with line numbering / code blocks)
-- **Filtering** (via glob patterns and `.c2pignore`)
+- **Filtering** (via glob patterns, `.c2pignore`, and `.gitignore` fallback)
 - **Custom templating** (via Handlebars)
 - **Token counting** (for OpenAI tiktoken-based models)
 - **Git diffs / logs** (for commit messages, PR templates, etc.)
@@ -33,7 +33,7 @@ The generated prompt can be automatically copied to your clipboard or saved to a
 ## Features
 
 - **Generate a single prompt** from multiple files/directories.
-- **Built-in filtering** using default rules (e.g., `node_modules/`, `*.png`, `*.mp4`) and `.c2pignore`.
+- **Built-in filtering** using default rules (e.g., `node_modules/`, `*.a`, `*.pcm`, `*.rlib`) and `.c2pignore` or `.gitignore` fallback.
 - **Glob patterns** for includes/excludes (`--include`, `--exclude`).
 - **Git support**: pass `--diff` for staged changes, or `--git-diff-branch` and `--git-log-branch` to compare two branches.
 - **Line numbers** in code blocks with `--line-number`.
@@ -176,9 +176,17 @@ code2prompt [OPTIONS] [PATHS...]
 
 `code2prompt` relies on [**the `ignore` crate**](https://docs.rs/ignore/) plus some *built-in* default ignores for typical junk/artifact folders:
 - `.git/`, `.svn/`, `.DS_Store`, `node_modules/`, `target/`, `bin/`, `obj/`, etc.
-- Common media (images, audio, videos), large binaries, etc.
+- Common media (images, audio, videos), large binaries, static libraries, compiled module caches, and common app/debug bundles.
 
-You can **extend ignoring** by placing a `.c2pignore` file in your project root. Each line can contain a pattern like `**/secret.txt` or `**/*.pdf`. Patterns are standard glob syntax. Comments (`#`) and blank lines are ignored.
+You can **control ignoring** by placing a `.c2pignore` file in your project root. It uses gitignore-style semantics through the `ignore` crate:
+- Comments (`#`) and blank lines are ignored.
+- `foo.txt` matches recursively by filename.
+- `/foo.txt` anchors to the `.c2pignore` directory.
+- `build/` ignores a directory subtree.
+- `!foo.txt` unignores a match.
+
+If a root `.c2pignore` exists, it is the only repo-level ignore source used by `code2prompt`.
+If there is no root `.c2pignore`, `code2prompt` falls back to the local `.gitignore` instead of scanning everything.
 
 You can also supply your own `--exclude` patterns on the command line, like `--exclude="*.lock,*.png"`. If you use `--include`, it takes precedence only if you specify `--include-priority`.
 

@@ -4,19 +4,19 @@
 //! Contributor: Olivier D'Ancona (@ODAncona)
 
 use anyhow::{Context, Result};
+use chrono::Local;
 use clap::Parser;
 use code2prompt::{
     copy_file_to_clipboard, copy_to_clipboard, get_git_diff, get_git_diff_between_branches,
     get_git_log, get_model_info, get_tokenizer, handle_undefined_variables, handlebars_setup,
     label, read_paths_from_clipboard, render_template, traverse_directory, write_to_file,
 };
-use chrono::Local;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error};
 use serde_json::json;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const DEFAULT_TEMPLATE_NAME: &str = "default";
 const CUSTOM_TEMPLATE_NAME: &str = "custom";
@@ -31,43 +31,80 @@ struct Cli {
     paths: Vec<PathBuf>,
 
     /// File extensions to include (comma-separated)
-    #[clap(short = 'i', long, help = "Comma-separated patterns of files to include\n(e.g. *.py,**/src/**)")]
+    #[clap(
+        short = 'i',
+        long,
+        help = "Comma-separated patterns of files to include\n(e.g. *.py,**/src/**)"
+    )]
     include: Option<String>,
 
     /// Patterns to exclude
-    #[clap(long, help = "Comma-separated patterns to exclude files from final output\n(e.g. *.txt, *.md)")]
+    #[clap(
+        long,
+        help = "Comma-separated patterns to exclude files from final output\n(e.g. *.txt, *.md)"
+    )]
     exclude: Option<String>,
 
     /// Include files in case of conflict between include and exclude patterns
-    #[clap(long, help = "If a file matches both --include and --exclude, favor \"include\"")]
+    #[clap(
+        long,
+        help = "If a file matches both --include and --exclude, favor \"include\""
+    )]
     include_priority: bool,
 
     /// Exclude files/folders from the source tree based on exclude patterns
-    #[clap(long, help = "Exclude files/folders from the source tree (they won't appear in\nthe tree listing, but might still be included if they're matched\nby --include)")]
+    #[clap(
+        long,
+        help = "Exclude files/folders from the source tree (they won't appear in\nthe tree listing, but might still be included if they're matched\nby --include)"
+    )]
     exclude_from_tree: bool,
 
     /// Optional tokenizer to use for token count (cl100k default)
-    #[clap(short = 'c', long, help = "Optional tokenizer to use for token count (default is \"cl100k\")\nValid choices: cl100k, p50k, p50k_edit, r50k, gpt2")]
+    #[clap(
+        short = 'c',
+        long,
+        help = "Optional tokenizer to use for token count (default is \"cl100k\")\nValid choices: cl100k, p50k, p50k_edit, r50k, gpt2"
+    )]
     encoding: Option<String>,
 
     /// Optional output file path
-    #[clap(short, long, help = "Write final result to this file (instead of / in addition to\ncopying to clipboard)")]
+    #[clap(
+        short,
+        long,
+        help = "Write final result to this file (instead of / in addition to\ncopying to clipboard)"
+    )]
     output: Option<String>,
 
     /// Include git diff
-    #[clap(short, long, help = "Include git diff (staged changes) from the repo at PATHS")]
+    #[clap(
+        short,
+        long,
+        help = "Include git diff (staged changes) from the repo at PATHS"
+    )]
     diff: bool,
 
     /// Generate git diff between two branches
-    #[clap(long, value_name = "BRANCHES", help = "Generate a git diff between two branches (comma-separated)\n(e.g. --git-diff-branch=\"main,development\")")]
+    #[clap(
+        long,
+        value_name = "BRANCHES",
+        help = "Generate a git diff between two branches (comma-separated)\n(e.g. --git-diff-branch=\"main,development\")"
+    )]
     git_diff_branch: Option<String>,
 
     /// Retrieve git log between two branches
-    #[clap(long, value_name = "BRANCHES", help = "Retrieve git log between two branches (comma-separated)\n(e.g. --git-log-branch=\"main,development\")")]
+    #[clap(
+        long,
+        value_name = "BRANCHES",
+        help = "Retrieve git log between two branches (comma-separated)\n(e.g. --git-log-branch=\"main,development\")"
+    )]
     git_log_branch: Option<String>,
 
     /// Add line numbers to the source code
-    #[clap(short, long, help = "Add line numbers to the source code in the output")]
+    #[clap(
+        short,
+        long,
+        help = "Add line numbers to the source code in the output"
+    )]
     line_number: bool,
 
     /// Disable wrapping code inside markdown code blocks
@@ -75,7 +112,10 @@ struct Cli {
     no_codeblock: bool,
 
     /// Use relative paths instead of absolute paths, including the parent directory
-    #[clap(long, help = "Use relative paths in the final listing (prefixed by the parent\ndirectory name)")]
+    #[clap(
+        long,
+        help = "Use relative paths in the final listing (prefixed by the parent\ndirectory name)"
+    )]
     relative_paths: bool,
 
     /// Disable copying to clipboard
@@ -104,15 +144,26 @@ struct Cli {
     template: Option<PathBuf>,
 
     /// Print output as JSON (ignored – final output is not printed)
-    #[clap(long, help = "(Placeholder) Print output as JSON\n(Currently ignored - no final JSON is printed)")]
+    #[clap(
+        long,
+        help = "(Placeholder) Print output as JSON\n(Currently ignored - no final JSON is printed)"
+    )]
     json: bool,
 
     /// Read paths from clipboard
-    #[clap(long, help = "Read paths from clipboard (instead of specifying them directly on\nthe command line)")]
+    #[clap(
+        long,
+        help = "Read paths from clipboard (instead of specifying them directly on\nthe command line)"
+    )]
     read: bool,
 
     /// Sampling rate (defaults to 10 if flag present without a value)
-    #[clap(short = 's', long = "sample-rate", default_missing_value = "10", help = "Provide a sampling rate (integer). Defaults to 10 if the flag is used\nwithout specifying a value.")]
+    #[clap(
+        short = 's',
+        long = "sample-rate",
+        default_missing_value = "10",
+        help = "Provide a sampling rate (integer). Defaults to 10 if the flag is used\nwithout specifying a value."
+    )]
     sample_rate: Option<u8>,
 }
 
@@ -136,7 +187,7 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         };
-        spinner.finish_with_message("Done!".green().to_string());
+        spinner.finish_with_message("Paths loaded.".green().to_string());
         return process_paths(&paths, &args);
     }
 
@@ -169,8 +220,6 @@ fn process_paths(paths: &[PathBuf], args: &Cli) -> Result<()> {
         }
 
         let spinner = setup_spinner(&format!("Processing {}...", folder.display()));
-        let c2pignore_patterns = load_c2pignore_patterns(folder)?;
-
         let (full_tree, all_files) = traverse_directory(
             folder,
             &include_patterns,
@@ -180,7 +229,6 @@ fn process_paths(paths: &[PathBuf], args: &Cli) -> Result<()> {
             args.relative_paths,
             args.exclude_from_tree,
             args.no_codeblock,
-            &c2pignore_patterns,
         )?;
 
         let (git_diff, git_diff_branch, git_log_branch) = if folder.is_dir() {
@@ -199,9 +247,8 @@ fn process_paths(paths: &[PathBuf], args: &Cli) -> Result<()> {
                     error!("Please provide exactly two branches separated by a comma.");
                     std::process::exit(1);
                 }
-                git_diff_branch =
-                    get_git_diff_between_branches(folder, &branches[0], &branches[1])
-                        .unwrap_or_default();
+                git_diff_branch = get_git_diff_between_branches(folder, &branches[0], &branches[1])
+                    .unwrap_or_default();
             }
 
             let mut git_log_branch = String::new();
@@ -212,14 +259,13 @@ fn process_paths(paths: &[PathBuf], args: &Cli) -> Result<()> {
                     error!("Please provide exactly two branches separated by a comma.");
                     std::process::exit(1);
                 }
-                git_log_branch = get_git_log(folder, &branches[0], &branches[1]).unwrap_or_default();
+                git_log_branch =
+                    get_git_log(folder, &branches[0], &branches[1]).unwrap_or_default();
             }
             (git_diff, git_diff_branch, git_log_branch)
         } else {
             (String::new(), String::new(), String::new())
         };
-
-        spinner.finish_with_message("Done!".green().to_string());
 
         let mut data = json!({
             "absolute_code_path": label(folder),
@@ -236,6 +282,7 @@ fn process_paths(paths: &[PathBuf], args: &Cli) -> Result<()> {
             serde_json::to_string_pretty(&data)?
         );
 
+        spinner.set_message("Rendering prompt...");
         handle_undefined_variables(&mut data, &template_content)?;
         let rendered = render_template(&handlebars, template_name, &data)?;
 
@@ -246,12 +293,14 @@ fn process_paths(paths: &[PathBuf], args: &Cli) -> Result<()> {
             indented = indent(&rendered, 2)
         );
         folder_outputs.push(wrapped);
+        spinner.finish_with_message(
+            format!("Processed {}.", folder.display())
+                .green()
+                .to_string(),
+        );
     }
 
-    let final_output = format!(
-        "<context>\n{}\n</context>",
-        folder_outputs.join("\n\n")
-    );
+    let final_output = format!("<context>\n{}\n</context>", folder_outputs.join("\n\n"));
 
     let token_count = {
         let bpe = get_tokenizer(&args.encoding);
@@ -287,11 +336,7 @@ fn process_paths(paths: &[PathBuf], args: &Cli) -> Result<()> {
                         "[".bold().white(),
                         "!".bold().red(),
                         "]".bold().white(),
-                        format!(
-                            "Failed to copy context.txt file to clipboard: {}",
-                            e
-                        )
-                        .red()
+                        format!("Failed to copy context.txt file to clipboard: {}", e).red()
                     );
                 } else {
                     println!(
@@ -335,6 +380,14 @@ fn process_paths(paths: &[PathBuf], args: &Cli) -> Result<()> {
     if let Some(output_path) = &args.output {
         write_to_file(output_path, &final_output)?;
     }
+
+    println!(
+        "{}{}{} {}",
+        "[".bold().white(),
+        "✓".bold().green(),
+        "]".bold().white(),
+        "Done.".green()
+    );
 
     Ok(())
 }
@@ -383,9 +436,8 @@ fn write_context_file(rendered: &str) -> Result<PathBuf> {
 
     context_path.push(filename);
 
-    fs::write(&context_path, rendered).with_context(|| {
-        format!("Failed to write context file at {}", context_path.display())
-    })?;
+    fs::write(&context_path, rendered)
+        .with_context(|| format!("Failed to write context file at {}", context_path.display()))?;
 
     println!(
         "{}{}{} {}",
@@ -396,25 +448,6 @@ fn write_context_file(rendered: &str) -> Result<PathBuf> {
     );
 
     Ok(context_path)
-}
-
-/// Reads patterns from a `c2pignore` file if it exists in the given folder.
-fn load_c2pignore_patterns(root_path: &Path) -> Result<Vec<String>> {
-    let c2pignore_path = root_path.join("c2pignore");
-    if !c2pignore_path.exists() {
-        return Ok(vec![]);
-    }
-    let contents = fs::read_to_string(&c2pignore_path)
-        .context("Failed to read c2pignore file")?;
-    let mut patterns = Vec::new();
-    for line in contents.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        patterns.push(trimmed.to_string());
-    }
-    Ok(patterns)
 }
 
 /// Parses comma-separated patterns into a vector of strings.
@@ -446,8 +479,8 @@ fn parse_patterns(patterns: &Option<String>) -> Vec<String> {
 /// Retrieves the template content and name based on CLI arguments.
 fn get_template(args: &Cli) -> Result<(String, &str)> {
     if let Some(template_path) = &args.template {
-        let content = fs::read_to_string(template_path)
-            .context("Failed to read custom template file")?;
+        let content =
+            fs::read_to_string(template_path).context("Failed to read custom template file")?;
         Ok((content, CUSTOM_TEMPLATE_NAME))
     } else {
         Ok((

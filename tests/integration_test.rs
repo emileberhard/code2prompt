@@ -252,4 +252,74 @@ mod tests {
         assert!(contains("BAZ.py").eval(&output));
         assert!(contains("CONTENT BAZ.PY").eval(&output));
     }
+
+    #[test]
+    fn test_gitignore_is_used_as_fallback_when_no_c2pignore_exists() {
+        let env = TestEnv::new();
+        create_temp_file(env.dir.path(), ".gitignore", "ignored.txt");
+        create_temp_file(env.dir.path(), "ignored.txt", "ignore me");
+        create_temp_file(env.dir.path(), "kept.txt", "keep me");
+
+        let mut cmd = env.command();
+        cmd.assert().success();
+
+        let output = env.read_output();
+        assert!(contains("kept.txt").eval(&output));
+        assert!(contains("keep me").eval(&output));
+        assert!(contains("ignored.txt`:").not().eval(&output));
+        assert!(contains("ignore me").not().eval(&output));
+    }
+
+    #[test]
+    fn test_root_c2pignore_takes_precedence_over_gitignore() {
+        let env = TestEnv::new();
+        create_temp_file(env.dir.path(), ".gitignore", "ignored-by-git.txt");
+        create_temp_file(env.dir.path(), ".c2pignore", "ignored-by-c2p.txt");
+        create_temp_file(env.dir.path(), "ignored-by-git.txt", "gitignore only");
+        create_temp_file(env.dir.path(), "ignored-by-c2p.txt", "c2pignore only");
+        create_temp_file(env.dir.path(), "kept.txt", "keep me");
+
+        let mut cmd = env.command();
+        cmd.assert().success();
+
+        let output = env.read_output();
+        assert!(contains("kept.txt").eval(&output));
+        assert!(contains("keep me").eval(&output));
+        assert!(contains("ignored-by-git.txt").eval(&output));
+        assert!(contains("gitignore only").eval(&output));
+        assert!(contains("ignored-by-c2p.txt`:").not().eval(&output));
+        assert!(contains("c2pignore only").not().eval(&output));
+    }
+
+    #[test]
+    fn test_default_excludes_skip_common_compiled_artifacts() {
+        let env = TestEnv::new();
+        create_temp_file(env.dir.path(), "keep.txt", "keep me");
+        create_temp_file(env.dir.path(), "artifacts/libghostty.a", "archive");
+        create_temp_file(env.dir.path(), "artifacts/module.pcm", "pcm");
+        create_temp_file(env.dir.path(), "artifacts/libfoo.rlib", "rlib");
+        create_temp_file(env.dir.path(), "artifacts/libfoo.rmeta", "rmeta");
+        create_temp_file(env.dir.path(), "artifacts/dep.bin", "bin");
+        create_temp_file(env.dir.path(), "artifacts/cache.swiftmodule", "swiftmodule");
+        create_temp_file(
+            env.dir.path(),
+            "MyApp.app/Contents/MacOS/MyApp",
+            "binary payload",
+        );
+
+        let mut cmd = env.command();
+        cmd.assert().success();
+
+        let output = env.read_output();
+        assert!(contains("keep.txt").eval(&output));
+        assert!(contains("keep me").eval(&output));
+        assert!(contains("libghostty.a").not().eval(&output));
+        assert!(contains("module.pcm").not().eval(&output));
+        assert!(contains("libfoo.rlib").not().eval(&output));
+        assert!(contains("libfoo.rmeta").not().eval(&output));
+        assert!(contains("dep.bin").not().eval(&output));
+        assert!(contains("cache.swiftmodule").not().eval(&output));
+        assert!(contains("MyApp.app").not().eval(&output));
+        assert!(contains("binary payload").not().eval(&output));
+    }
 }

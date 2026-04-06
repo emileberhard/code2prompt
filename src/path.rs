@@ -1,15 +1,15 @@
 //! This module contains the functions for traversing the directory and processing the files.
 
 use anyhow::Result;
-use ignore::WalkBuilder;
+use glob::Pattern;
 use ignore::overrides::OverrideBuilder;
+use ignore::WalkBuilder;
+use lazy_static::lazy_static;
 use log::debug;
+use regex::Regex;
 use serde_json::json;
 use std::{fs, path::Path};
 use termtree::Tree;
-use regex::Regex;
-use lazy_static::lazy_static;
-use glob::Pattern;
 
 lazy_static! {
     static ref BASE64_REGEX: Regex = Regex::new(r#"(?P<b64>[A-Za-z0-9+/=]{80,})"#).unwrap();
@@ -25,16 +25,18 @@ lazy_static! {
 ///
 /// * `String` - The content with shortened base64 strings
 pub fn shorten_long_base64_strings(code: &str) -> String {
-    BASE64_REGEX.replace_all(code, |caps: &regex::Captures| {
-        let b64 = &caps["b64"];
-        if b64.len() > 100 {
-            let start = &b64[..50];
-            let end = &b64[b64.len()-50..];
-            format!("{}...{}", start, end)
-        } else {
-            b64.to_string()
-        }
-    }).to_string()
+    BASE64_REGEX
+        .replace_all(code, |caps: &regex::Captures| {
+            let b64 = &caps["b64"];
+            if b64.len() > 100 {
+                let start = &b64[..50];
+                let end = &b64[b64.len() - 50..];
+                format!("{}...{}", start, end)
+            } else {
+                b64.to_string()
+            }
+        })
+        .to_string()
 }
 
 /// Traverses the directory and returns the string representation of the tree and the vector of JSON file representations.
@@ -49,8 +51,6 @@ pub fn shorten_long_base64_strings(code: &str) -> String {
 /// * `relative_paths` - Whether to use relative paths.
 /// * `exclude_from_tree` - Whether to exclude files from the tree.
 /// * `no_codeblock` - Whether to not wrap the code block with a delimiter.
-/// * `_c2pignore_patterns` - Deprecated parameter, no longer used as ignore patterns are handled by the ignore crate.
-///
 /// # Returns
 ///
 /// A tuple containing the string representation of the directory tree and a vector of JSON representations of the files.
@@ -59,12 +59,11 @@ pub fn traverse_directory(
     root_path: &Path,
     include_patterns: &[String],
     exclude_patterns: &[String],
-    _include_priority: bool,
+    include_priority: bool,
     line_number: bool,
     relative_paths: bool,
     exclude_from_tree: bool,
     no_codeblock: bool,
-    _c2pignore_patterns: &[String], // Deprecated parameter
 ) -> Result<(String, Vec<serde_json::Value>)> {
     let canonical_root_path = root_path.canonicalize()?;
     let parent_directory = label(&canonical_root_path);
@@ -95,15 +94,23 @@ pub fn traverse_directory(
         return Ok((canonical_root_path.display().to_string(), files));
     }
 
-    // Directory case: Build WalkBuilder with .c2pignore support
+    // Respect a repo-local .c2pignore when present. If the repo hasn't opted
+    // into that yet, fall back to the local .gitignore instead of walking
+    // through every tracked build artifact in sight.
+    let has_root_c2pignore = canonical_root_path.join(".c2pignore").is_file();
+
+    // Directory case: Build WalkBuilder with ignore file support
     let mut builder = WalkBuilder::new(&canonical_root_path);
     builder
         .hidden(false)
-        .git_ignore(false)
         .ignore(true)
+        .git_ignore(!has_root_c2pignore)
+        .git_global(false)
+        .git_exclude(false)
+        .require_git(false)
         .add_custom_ignore_filename(".c2pignore");
 
-    // Create override builder for default excludes + user excludes
+    // Create override builder for default excludes
     let mut override_builder = OverrideBuilder::new(&canonical_root_path);
 
     // 1) Add default excludes that will always apply
@@ -114,12 +121,11 @@ pub fn traverse_directory(
         "!**/.hg/**",
         "!**/.DS_Store",
         "!**/.idea/**",
-        "!**/*.swp",       // vim swap files
+        "!**/*.swp", // vim swap files
         "!**/.history/**",
         "!**/.cache/**",
         "!**/tmp/**",
         "!**/temp/**",
-
         // Python-related:
         "!**/__pycache__/**",
         "!**/.pytest_cache/**",
@@ -127,7 +133,6 @@ pub fn traverse_directory(
         "!**/.venv/**",
         "!**/venv/**",
         "!**/.virtualenv/**",
-
         // NodeJS / JS / TS:
         "!**/node_modules/**",
         "!**/npm-debug.log",
@@ -137,12 +142,10 @@ pub fn traverse_directory(
         "!**/dist/**",
         "!**/build/**",
         "!**/out/**",
-
         // Rust:
         "!**/target/**",
         "!**/Cargo.lock",
         "!**/.cargo/**",
-
         // Java / Maven / Gradle:
         "!**/target/**",
         "!**/.gradle/**",
@@ -150,21 +153,17 @@ pub fn traverse_directory(
         "!**/*.class",
         "!**/*.jar",
         "!**/*.war",
-
         // Dotnet / C#:
         "!**/bin/**",
         "!**/obj/**",
-
         // Docker & ephemeral:
         "!**/.docker/**",
         "!**/docker-compose.override.yml",
         "!**/docker-compose.override.yaml",
-
         // Lockfiles:
         "!**/*.lock",
         "!**/Gemfile.lock",
         "!**/Pipfile.lock",
-
         // Misc:
         "!**/*.log",
         "!**/coverage/**",
@@ -175,7 +174,6 @@ pub fn traverse_directory(
         "!**/.next/**",
         "!**/.nuxt/**",
         "!**/.angular/**",
-
         // Binary/Object files:
         "!**/*.pyc",
         "!**/*.pyo",
@@ -185,13 +183,29 @@ pub fn traverse_directory(
         "!**/*.dll",
         "!**/*.exe",
         "!**/*.o",
-
+        "!**/*.a",
+        "!**/*.lib",
+        "!**/*.rlib",
+        "!**/*.rmeta",
+        "!**/*.pcm",
+        "!**/*.car",
+        "!**/*.swiftmodule",
+        "!**/*.bin",
         // Additional:
         "!**/*.obj",
         "!**/Thumbs.db",
         "!**/*.sqlite",
         "!**/*.db",
-
+        "!**/*.app",
+        "!**/*.framework",
+        "!**/*.dSYM",
+        "!**/*.xpc",
+        "!**/*.plugin",
+        "!**/*.app/**",
+        "!**/*.framework/**",
+        "!**/*.dSYM/**",
+        "!**/*.xpc/**",
+        "!**/*.plugin/**",
         // COMMENTED OUT - Media files now appear in tree but content is not read
         // // Media files - Images:
         // "!**/*.png",
@@ -254,60 +268,24 @@ pub fn traverse_directory(
         override_builder.add(pattern)?;
     }
 
-    // 2) Handle user excludes - ensure they're prefixed with !
-    for exc in exclude_patterns {
-        if exc.contains('*') {
-            let exclude_pattern = if exc.starts_with('!') {
-                exc.to_string()
-            } else {
-                format!("!{}", exc)
-            };
-            override_builder.add(&exclude_pattern)?;
-        } else {
-            override_builder.add(&format!("!**/*.{}", exc))?;
-        }
-    }
-
     let overrides = override_builder.build()?;
     builder.overrides(overrides);
 
     let walker = builder.build();
 
     // If --include patterns are provided, compile them once for use inside the loop.
-    let compiled_includes: Option<Vec<Pattern>> = if !include_patterns.is_empty() {
-        Some(
-            include_patterns
-                .iter()
-                .map(|pat| {
-                    if pat.eq_ignore_ascii_case("dockerfile") || pat.eq_ignore_ascii_case("docker") {
-                        Pattern::new("**/Dockerfile")
-                            .unwrap_or_else(|_| Pattern::new("*").unwrap())
-                    } else if pat.eq_ignore_ascii_case("env") {
-                        Pattern::new("**/.env*")
-                            .unwrap_or_else(|_| Pattern::new("*").unwrap())
-                    } else if pat.contains('*') || pat.contains('/') {
-                        Pattern::new(pat).unwrap_or_else(|_| Pattern::new("*").unwrap())
-                    } else {
-                        Pattern::new(&format!("**/*.{}", pat))
-                            .unwrap_or_else(|_| Pattern::new("*").unwrap())
-                    }
-                })
-                .collect()
-        )
-    } else {
-        None
-    };
+    let compiled_includes = compile_cli_patterns(include_patterns);
+    let compiled_excludes = compile_cli_patterns(exclude_patterns);
 
     let mut root = Tree::new(parent_directory.clone());
     let mut collected_files = Vec::new();
 
     // Define extensions we want in the tree but NOT in the context
     let binary_extensions = vec![
-        "png", "jpg", "jpeg", "gif", "ico", "bmp", "tiff", "tif", "webp", "svg", "psd", "ai", "xcf",
-        "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v", "3gp",
-        "mp3", "wav", "ogg", "m4a", "flac", "aac", "wma", "mid", "midi",
-        "pdf", "zip", "rar", "7z", "tar", "gz", "bz2", "xz",
-        "doc", "docx", "ppt", "pptx", "xls", "xlsx"
+        "png", "jpg", "jpeg", "gif", "ico", "bmp", "tiff", "tif", "webp", "svg", "psd", "ai",
+        "xcf", "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v", "3gp", "mp3", "wav", "ogg",
+        "m4a", "flac", "aac", "wma", "mid", "midi", "pdf", "zip", "rar", "7z", "tar", "gz", "bz2",
+        "xz", "doc", "docx", "ppt", "pptx", "xls", "xlsx",
     ];
 
     // 3) Traverse files
@@ -335,11 +313,25 @@ pub fn traverse_directory(
         let is_binary = binary_extensions.contains(&extension.as_str());
 
         // Check if path matches an --include pattern
-        let file_matches_include = if let Some(ref patterns) = compiled_includes {
-            let rel_str = relative.to_str().unwrap_or("");
-            patterns.iter().any(|p| p.matches(rel_str))
-        } else {
-            true // If no --include given, everything is included
+        let rel_str = relative.to_str().unwrap_or("");
+        let file_matches_include = compiled_includes
+            .as_ref()
+            .map(|patterns| patterns.iter().any(|p| p.matches(rel_str)))
+            .unwrap_or(true);
+        let file_matches_exclude = compiled_excludes
+            .as_ref()
+            .map(|patterns| patterns.iter().any(|p| p.matches(rel_str)))
+            .unwrap_or(false);
+        let file_selected = match (
+            compiled_includes.is_some(),
+            file_matches_include,
+            file_matches_exclude,
+        ) {
+            (true, true, true) => include_priority,
+            (true, true, false) => true,
+            (true, false, _) => false,
+            (false, _, true) => false,
+            (false, _, false) => true,
         };
 
         // Determine the "depth" by component count
@@ -349,7 +341,7 @@ pub fn traverse_directory(
         //    - It's included, OR
         //    - The depth is <= 3
         if !exclude_from_tree {
-            if file_matches_include || depth <= 3 {
+            if file_selected || (!file_matches_exclude && depth <= 3) {
                 add_path_to_tree(&mut root, relative);
             }
         }
@@ -361,7 +353,7 @@ pub fn traverse_directory(
         }
 
         // 3) If it's a file that is actually included AND not binary, read its content
-        if file_matches_include && !is_binary {
+        if file_selected && !is_binary {
             if let Ok(code_bytes) = fs::read(path) {
                 let mut code = String::from_utf8_lossy(&code_bytes).to_string();
                 code = code.replace(char::REPLACEMENT_CHARACTER, "[]");
@@ -394,6 +386,30 @@ pub fn traverse_directory(
     };
 
     Ok((tree_str, collected_files))
+}
+
+fn compile_cli_patterns(patterns: &[String]) -> Option<Vec<Pattern>> {
+    if patterns.is_empty() {
+        return None;
+    }
+
+    Some(
+        patterns
+            .iter()
+            .map(|pat| {
+                if pat.eq_ignore_ascii_case("dockerfile") || pat.eq_ignore_ascii_case("docker") {
+                    Pattern::new("**/Dockerfile").unwrap_or_else(|_| Pattern::new("*").unwrap())
+                } else if pat.eq_ignore_ascii_case("env") {
+                    Pattern::new("**/.env*").unwrap_or_else(|_| Pattern::new("*").unwrap())
+                } else if pat.contains('*') || pat.contains('/') {
+                    Pattern::new(pat).unwrap_or_else(|_| Pattern::new("*").unwrap())
+                } else {
+                    Pattern::new(&format!("**/*.{}", pat))
+                        .unwrap_or_else(|_| Pattern::new("*").unwrap())
+                }
+            })
+            .collect(),
+    )
 }
 
 /// Helper to nest a relative path in the tree structure
@@ -453,7 +469,12 @@ pub fn label<P: AsRef<Path>>(p: P) -> String {
 /// # Returns
 ///
 /// * `String` - The wrapped code block.
-pub fn wrap_code_block(code: &str, extension: &str, line_numbers: bool, no_codeblock: bool) -> String {
+pub fn wrap_code_block(
+    code: &str,
+    extension: &str,
+    line_numbers: bool,
+    no_codeblock: bool,
+) -> String {
     let delimiter = "`".repeat(3);
     let mut code_with_line_numbers = String::new();
 

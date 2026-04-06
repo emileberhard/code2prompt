@@ -1,4 +1,4 @@
-use code2prompt::filter::should_include_file;
+use code2prompt::filter::should_include_file as deprecated_should_include_file;
 use colored::*;
 use once_cell::sync::Lazy;
 use std::fs::{self, File};
@@ -53,6 +53,21 @@ fn create_test_hierarchy(base_path: &Path) {
         "]".bold().white(),
         "Tempfiles created".green()
     );
+}
+
+fn should_include_file(
+    path: &Path,
+    include_patterns: &[String],
+    exclude_patterns: &[String],
+    include_priority: bool,
+) -> bool {
+    deprecated_should_include_file(
+        path,
+        include_patterns,
+        exclude_patterns,
+        include_priority,
+        &[],
+    )
 }
 
 #[cfg(test)]
